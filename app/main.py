@@ -187,6 +187,12 @@ def main():
     )
     actuator = AlertActuator(sound_path=ALERT_SOUND_PATH)
     database = Database(database_path=DATABASE_PATH, async_mode=True)
+    fatigue_monitor = FatigueMonitor(
+    mar_threshold=MAR_YAWN_THRESHOLD,
+    yawn_seconds=1.2,
+    head_down_degrees=18.0,
+    head_down_seconds=1.5,
+)
 
     frame_count = 0
     prev_state = AlertState.NORMAL
@@ -208,51 +214,101 @@ def main():
             width = getattr(frame, "shape", [480, 640])[1]
 
             landmarks = detector.detect(frame) if HAS_CV2 else None
-
             ear = 0.0
             mar = 0.0
             pitch, yaw, roll = 0.0, 0.0, 0.0
             eyes_closed = False
-            perclos = 0.0
-            state = AlertState.NORMAL
 
-            if landmarks is not None:
-                # 1. Eye Landmarks & EAR
-                left_eye = get_eye_points(landmarks, LEFT_EYE_IDS, width, height)
-                right_eye = get_eye_points(landmarks, RIGHT_EYE_IDS, width, height)
-
+            if landmarks is None:
+                # Missing face is NOT equivalent to an alert, awake driver.
+                alert_state_str = "no_face"
+                fatigue_signals = fatigue_monitor.update(
+                    mar=0.0,
+                    pitch=0.0,
+                    face_detected=False,
+                )
+            
+                # Do not insert false "eyes open" samples into PERCLOS.
+                perclos = getattr(main, "_last_perclos", 0.0)
+            
+            else:
+                # 1. Eye-closure measurement
+                left_eye = get_eye_points(
+                    landmarks, LEFT_EYE_IDS, width, height
+                )
+                right_eye = get_eye_points(
+                    landmarks, RIGHT_EYE_IDS, width, height
+                )
+            
                 left_ear = calculate_ear(left_eye)
                 right_ear = calculate_ear(right_eye)
                 ear = (left_ear + right_ear) / 2.0
                 eyes_closed = ear < EAR_CLOSED_THRESHOLD
-
-                # 2. Mouth Landmarks & MAR (Yawning)
+            
+                # 2. Mouth opening and head pose
                 mouth_pts = get_mouth_points(landmarks, width, height)
                 mar = calculate_mar(mouth_pts)
-
-                # 3. Head Pose Estimation (Nodding / Distraction)
-                pitch, yaw, roll = estimate_head_pose(landmarks, width, height)
-
-                # 4. Draw facial contours for active tracking visualization
+                pitch, yaw, roll = estimate_head_pose(
+                    landmarks, width, height
+                )
+            
+                # 3. Sustained fatigue-related signals
+                fatigue_signals = fatigue_monitor.update(
+                    mar=mar,
+                    pitch=pitch,
+                    face_detected=True,
+                )
+            
+                # 4. Update PERCLOS only when the face is available
+                perclos = perclos_tracker.update(eyes_closed)
+                main._last_perclos = perclos
+            
+                closed_duration = (
+                    perclos_tracker.get_current_closed_duration()
+                )
+            
+                # 5. Base decision from existing eye-closure controller
+                state = controller.update(
+                    perclos,
+                    continuous_closed_seconds=closed_duration,
+                )
+            
+                # 6. Add the new fatigue signals
+                # Sustained head drooping is treated as critical evidence.
+                # Yawning alone is only a warning-level indicator.
+                if fatigue_signals.head_drooping:
+                    state = AlertState.CRITICAL
+                elif fatigue_signals.yawning and state == AlertState.NORMAL:
+                    state = AlertState.WARNING
+            
+                alert_state_str = state.value
+            
+                # 7. Draw face tracking contours
                 if HAS_CV2 and HAS_NUMPY:
-                    cv2.polylines(frame, [np.array(left_eye, dtype=np.int32)], True, (0, 255, 0), 1)
-                    cv2.polylines(frame, [np.array(right_eye, dtype=np.int32)], True, (0, 255, 0), 1)
-                    cv2.polylines(frame, [np.array(mouth_pts, dtype=np.int32)], True, (255, 150, 0), 1)
-
-            # 5. PERCLOS & Alert State Machine Update
-            perclos = perclos_tracker.update(eyes_closed)
-            closed_duration = perclos_tracker.get_current_closed_duration()
-            state = controller.update(perclos, continuous_closed_seconds=closed_duration)
-            alert_state_str = state.value
-
-            # 6. Physical & Acoustic Actuation
-            if state != AlertState.NORMAL and (state != prev_state or (time.time() - controller.last_alert_time) < 0.1):
-                actuator.trigger(state)
-                database.log_alert(alert_state_str, "audio")
-
-            prev_state = state
-
-            # 7. Asynchronous Telemetry & Predictions Logging
+                    cv2.polylines(
+                        frame, [np.array(left_eye, dtype=np.int32)],
+                        True, (0, 255, 0), 1
+                    )
+                    cv2.polylines(
+                        frame, [np.array(right_eye, dtype=np.int32)],
+                        True, (0, 255, 0), 1
+                    )
+                    cv2.polylines(
+                        frame, [np.array(mouth_pts, dtype=np.int32)],
+                        True, (255, 150, 0), 1
+                    )
+            
+            # 8. Trigger alerts only on state changes, not on every frame.
+            # Do not activate drowsiness alarms when the face is missing.
+            if alert_state_str != "no_face":
+                if alert_state_str != prev_state.value:
+                    if alert_state_str != "normal":
+                        actuator.trigger(alert_state_str)
+                        database.log_alert(alert_state_str, "audio")
+            
+                prev_state = state
+            
+            # 9. Log measurements. Use the current schema.
             database.log_prediction(
                 perclos=perclos,
                 ear=ear,
@@ -260,8 +316,9 @@ def main():
                 mar=mar,
                 head_pitch=pitch,
                 head_yaw=yaw,
-                model_version="rule_v1"
+                model_version="rules_v2",
             )
+
 
             # Latency and FPS computation
             elapsed_ms = (time.time() - loop_start) * 1000.0
