@@ -1,0 +1,23 @@
+# Git ignore file for Driver Drowsiness AI Project
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+data/logs/*.db
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+models/trained/*
+!models/trained/.gitkeep
+models/exported/*
+!models/exported/.gitkeep
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.vscode/
+.idea/
