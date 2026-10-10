@@ -295,5 +295,111 @@ def main():
         print("[Driver Drowsiness AI] Shutdown completed successfully.")
 
 
+# ---------------------------------------------------------------------------
+# Top-level Web / Serverless WSGI Application Exports (Vercel, Gunicorn, AWS)
+# ---------------------------------------------------------------------------
+import json
+
+
+def create_wsgi_app():
+    """
+    Standard WSGI/HTTP callable for cloud serverless deployments (Vercel, Render, Gunicorn).
+    Provides health-check, telemetry, threshold parameters, and prediction query endpoints.
+    """
+    def wsgi_handler(environ, start_response):
+        path = environ.get('PATH_INFO', '/') or '/'
+        method = environ.get('REQUEST_METHOD', 'GET')
+
+        headers = [
+            ('Content-Type', 'application/json'),
+            ('Access-Control-Allow-Origin', '*'),
+            ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
+            ('Access-Control-Allow-Headers', 'Content-Type'),
+        ]
+
+        if method == 'OPTIONS':
+            start_response('204 No Content', headers)
+            return [b'']
+
+        if path in ['/', '/health']:
+            payload = {
+                "status": "online",
+                "service": "driver-drowsiness-ai",
+                "version": "1.0.0",
+                "description": "Edge-AI Driver Drowsiness Detection and Alert System",
+                "endpoints": {
+                    "/health": "Service health probe",
+                    "/api/status": "System threshold configurations",
+                    "/api/predictions": "Latest inference log records",
+                    "/api/alerts": "Recent alert notifications"
+                }
+            }
+            start_response('200 OK', headers)
+            return [json.dumps(payload, indent=2).encode('utf-8')]
+
+        elif path == '/api/status':
+            payload = {
+                "status": "ready",
+                "thresholds": {
+                    "ear_closed_threshold": EAR_CLOSED_THRESHOLD,
+                    "mar_yawn_threshold": MAR_YAWN_THRESHOLD,
+                    "perclos_watch_threshold": PERCLOS_WATCH_THRESHOLD,
+                    "perclos_warning_threshold": PERCLOS_WARNING_THRESHOLD,
+                    "perclos_critical_threshold": PERCLOS_CRITICAL_THRESHOLD,
+                    "perclos_window_seconds": PERCLOS_WINDOW_SECONDS,
+                    "alert_cooldown_seconds": ALERT_COOLDOWN_SECONDS
+                }
+            }
+            start_response('200 OK', headers)
+            return [json.dumps(payload, indent=2).encode('utf-8')]
+
+        elif path == '/api/predictions':
+            preds = []
+            try:
+                db = Database(database_path=DATABASE_PATH, async_mode=False)
+                recent = db.get_recent_predictions(limit=15)
+                db.close()
+                for r in recent:
+                    preds.append({
+                        "timestamp": r[0],
+                        "perclos": r[1],
+                        "ear": r[2],
+                        "alert_state": r[3]
+                    })
+            except Exception as e:
+                preds = []
+            start_response('200 OK', headers)
+            return [json.dumps({"predictions": preds}).encode('utf-8')]
+
+        elif path == '/api/alerts':
+            alerts = []
+            try:
+                db = Database(database_path=DATABASE_PATH, async_mode=False)
+                recent = db.get_recent_alerts(limit=15)
+                db.close()
+                for r in recent:
+                    alerts.append({
+                        "timestamp": r[0],
+                        "level": r[1],
+                        "channel": r[2]
+                    })
+            except Exception as e:
+                alerts = []
+            start_response('200 OK', headers)
+            return [json.dumps({"alerts": alerts}).encode('utf-8')]
+
+        else:
+            start_response('404 Not Found', headers)
+            return [json.dumps({"error": "Route not found", "path": path}).encode('utf-8')]
+
+    return wsgi_handler
+
+
+# Export top-level variables required by Vercel, AWS Lambda, and WSGI servers:
+app = create_wsgi_app()
+application = app
+handler = app
+
+
 if __name__ == "__main__":
     main()
