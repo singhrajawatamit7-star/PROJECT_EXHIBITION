@@ -1,3 +1,4 @@
+from fatigue_monitor import FatigueMonitor
 import argparse
 import sys
 import time
