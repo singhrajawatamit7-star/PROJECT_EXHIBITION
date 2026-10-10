@@ -185,6 +185,12 @@ def main():
         critical_duration=CRITICAL_CONSECUTIVE_SECONDS,
         cooldown_seconds=ALERT_COOLDOWN_SECONDS
     )
+    camera = Camera(
+    camera_source=camera_source,
+    width=FRAME_WIDTH,
+    height=FRAME_HEIGHT,
+    fallback_synthetic=False,
+)
     actuator = AlertActuator(sound_path=ALERT_SOUND_PATH)
     database = Database(database_path=DATABASE_PATH, async_mode=True)
     fatigue_monitor = FatigueMonitor(
