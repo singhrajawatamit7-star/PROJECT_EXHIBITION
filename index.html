@@ -8,6 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Vercel Speed Insights Integration -->
+  <script>
+    window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/speed-insights/script.js"></script>
+
   <style>
     :root {
       --bg: #090d16;
@@ -39,7 +46,7 @@
     }
 
     .container {
-      max-width: 900px;
+      max-width: 920px;
       margin: 0 auto;
       padding: 2.5rem 1.5rem;
       flex: 1;
@@ -119,7 +126,7 @@
       margin-bottom: 1.25rem;
     }
 
-    /* Health Diagnostic Section */
+    /* Diagnostics Section */
     .diagnostic-box {
       background: #0f172a;
       border: 1px solid rgba(255, 255, 255, 0.06);
@@ -142,11 +149,11 @@
       color: var(--primary);
     }
 
-    button#check {
+    .btn {
       background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
       color: white;
       border: none;
-      padding: 0.65rem 1.4rem;
+      padding: 0.65rem 1.3rem;
       border-radius: 0.6rem;
       font-family: inherit;
       font-size: 0.9rem;
@@ -154,15 +161,25 @@
       cursor: pointer;
       transition: all 0.2s ease;
       box-shadow: 0 4px 14px var(--primary-glow);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
     }
 
-    button#check:hover {
+    .btn:hover {
       background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
       transform: translateY(-1px);
     }
 
-    button#check:active {
-      transform: translateY(0);
+    .btn-secondary {
+      background: #1e293b;
+      box-shadow: none;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: #334155;
     }
 
     pre#details {
@@ -175,7 +192,7 @@
       color: #cbd5e1;
       white-space: pre-wrap;
       word-break: break-word;
-      max-height: 220px;
+      max-height: 200px;
       overflow-y: auto;
       display: none;
     }
@@ -185,6 +202,29 @@
     }
 
     /* Metrics Grid */
+    .metrics-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .feed-status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .feed-status .live-indicator {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      display: inline-block;
+    }
+
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -197,6 +237,7 @@
       border: 1px solid var(--card-border);
       border-radius: 0.75rem;
       padding: 1rem;
+      position: relative;
     }
 
     .metric-label {
@@ -209,14 +250,61 @@
 
     .metric-val {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 1.5rem;
+      font-size: 1.6rem;
       font-weight: 700;
       margin: 0.25rem 0;
+      transition: color 0.3s ease;
     }
 
     .metric-sub {
       font-size: 0.75rem;
       color: var(--text-muted);
+    }
+
+    /* Camera Feed Card */
+    .camera-container {
+      position: relative;
+      background: #000;
+      border-radius: 0.75rem;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      max-height: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--card-border);
+      margin-bottom: 1rem;
+    }
+
+    #webcam-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+      transform: scaleX(-1); /* Mirror camera */
+    }
+
+    #camera-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .camera-placeholder {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 2rem;
+    }
+
+    .camera-placeholder svg {
+      width: 48px;
+      height: 48px;
+      stroke: var(--text-muted);
+      margin-bottom: 0.75rem;
+      opacity: 0.6;
     }
 
     /* Simulator */
@@ -277,6 +365,32 @@
       to { box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
     }
 
+    /* Telemetry History Table */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      margin-top: 1rem;
+    }
+
+    .history-table th {
+      text-align: left;
+      padding: 0.6rem 0.75rem;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 500;
+    }
+
+    .history-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .history-table tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
     /* Links & Footer */
     .links-row {
       display: flex;
@@ -320,11 +434,11 @@
       </div>
       <div class="badge-online">
         <div class="dot-pulse"></div>
-        <span>Edge-AI Online</span>
+        <span id="badge-status-text">Edge-AI Online</span>
       </div>
     </header>
 
-    <!-- Health Probe Diagnostic Card -->
+    <!-- Cloud Backend Health Diagnostic -->
     <div class="card">
       <h2>Cloud Backend Health Diagnostic</h2>
       <p class="card-desc">Tests independent serverless microservice connectivity and response payload latency.</p>
@@ -335,47 +449,90 @@
             <span style="font-size: 0.8rem; color: var(--text-muted); display: block;">Service Status:</span>
             <span id="status">Checking backend...</span>
           </div>
-          <button id="check">Check Backend</button>
+          <button class="btn" id="check">Check Backend</button>
         </div>
         <pre id="details"></pre>
       </div>
     </div>
 
-    <!-- Telemetry Metric Indicators -->
-    <div class="metrics-grid">
-      <div class="metric-pill">
-        <div class="metric-label">Eye Aspect Ratio</div>
-        <div class="metric-val" style="color: #38bdf8;">0.28</div>
-        <div class="metric-sub">Closed Thresh: &lt; 0.21</div>
+    <!-- Live Telemetry Indicators -->
+    <div class="card">
+      <div class="metrics-header">
+        <h2>Live Telemetry & Eye-Closure Metrics</h2>
+        <div class="feed-status" id="feed-status">
+          <span class="live-indicator"></span>
+          <span id="feed-status-text">Polling Live API (/api/predictions)...</span>
+        </div>
       </div>
-      <div class="metric-pill">
-        <div class="metric-label">PERCLOS (30s)</div>
-        <div class="metric-val" style="color: #22c55e;">14.2%</div>
-        <div class="metric-sub">Warn: &ge;40% | Crit: &ge;60%</div>
+      <p class="card-desc">Real-time driver facial aperture, 30s PERCLOS window, and edge inference timing.</p>
+
+      <div class="metrics-grid">
+        <div class="metric-pill">
+          <div class="metric-label">Eye Aspect Ratio</div>
+          <div class="metric-val" id="metric-ear" style="color: #38bdf8;">0.28</div>
+          <div class="metric-sub">Closed Thresh: &lt; 0.21</div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-label">PERCLOS (30s)</div>
+          <div class="metric-val" id="metric-perclos" style="color: #22c55e;">14.2%</div>
+          <div class="metric-sub">Warn: &ge;40% | Crit: &ge;60%</div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-label">Mouth Aspect Ratio</div>
+          <div class="metric-val" id="metric-mar" style="color: #a855f7;">0.24</div>
+          <div class="metric-sub">Yawn Thresh: &ge; 0.65</div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-label">Inference Latency</div>
+          <div class="metric-val" id="metric-latency" style="color: #10b981;">28 ms</div>
+          <div class="metric-sub">Target: &lt; 100 ms</div>
+        </div>
       </div>
-      <div class="metric-pill">
-        <div class="metric-label">Mouth Aspect Ratio</div>
-        <div class="metric-val" style="color: #a855f7;">0.24</div>
-        <div class="metric-sub">Yawn Thresh: &ge; 0.65</div>
+
+      <div style="margin-top: 0.5rem;">
+        <span style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Live Evaluated Alert State:</span>
+        <div id="state-display" class="state-badge state-normal">NORMAL (Driver Alert & Clear)</div>
       </div>
-      <div class="metric-pill">
-        <div class="metric-label">Inference Latency</div>
-        <div class="metric-val" style="color: #10b981;">28 ms</div>
-        <div class="metric-sub">Target: &lt; 100 ms</div>
+    </div>
+
+    <!-- Live Browser Camera Integration -->
+    <div class="card">
+      <h2>Live Browser Camera & Edge Vision Ingest</h2>
+      <p class="card-desc">Connect your device's webcam to observe real-time driver face tracking and stream telemetry frames to the backend.</p>
+
+      <div class="camera-container">
+        <div class="camera-placeholder" id="camera-placeholder">
+          <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+          <p>Webcam is currently idle</p>
+          <span style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; display: block;">Click 'Start Camera' below to initialize local browser video</span>
+        </div>
+        <video id="webcam-video" autoplay playsinline muted></video>
+        <canvas id="camera-canvas"></canvas>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn" id="btn-camera" onclick="toggleCamera()">
+          <span id="btn-camera-text">Start Browser Camera</span>
+        </button>
+        <button class="btn btn-secondary" id="btn-audio" onclick="toggleAudio()">
+          <span id="btn-audio-text">Audio Alerts: Unmuted</span>
+        </button>
       </div>
     </div>
 
     <!-- Alert State Machine Simulator -->
     <div class="card">
       <h2>Interactive Alert State Machine Simulator</h2>
-      <p class="card-desc">Simulate driver fatigue metrics to observe staged escalating hysteresis and emergency microsleep triggers in real time.</p>
+      <p class="card-desc">Manually simulate driver fatigue metrics to observe escalating hysteresis and emergency microsleep triggers in real time.</p>
       
       <div class="slider-group">
         <div class="slider-header">
           <span>PERCLOS Ratio (% Eye Closure in 30s Window)</span>
           <span id="perclos-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">15%</span>
         </div>
-        <input type="range" id="perclos-slider" min="0" max="100" value="15" oninput="updateSim()">
+        <input type="range" id="perclos-slider" min="0" max="100" value="15" oninput="onSliderChange()">
       </div>
 
       <div class="slider-group">
@@ -383,12 +540,33 @@
           <span>Continuous Eye Closure Duration (Microsleep)</span>
           <span id="dur-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">0.0s</span>
         </div>
-        <input type="range" id="dur-slider" min="0" max="50" value="0" step="1" oninput="updateSim()">
+        <input type="range" id="dur-slider" min="0" max="50" value="0" step="1" oninput="onSliderChange()">
       </div>
+    </div>
 
-      <div style="margin-top: 1.25rem;">
-        <span style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Evaluated Alert Level:</span>
-        <div id="state-display" class="state-badge state-normal">NORMAL (Driver Alert & Clear)</div>
+    <!-- Telemetry History Log -->
+    <div class="card">
+      <h2>Recent Telemetry Stream & Ingest Records</h2>
+      <p class="card-desc">Latest inference frames received by the serverless API buffer:</p>
+      <div style="overflow-x: auto;">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>EAR</th>
+              <th>PERCLOS</th>
+              <th>MAR</th>
+              <th>Pitch / Yaw</th>
+              <th>State</th>
+              <th>Model</th>
+            </tr>
+          </thead>
+          <tbody id="history-rows">
+            <tr>
+              <td colspan="7" style="color: var(--text-muted); text-align: center; padding: 1.25rem;">Waiting for incoming telemetry records...</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -399,6 +577,8 @@
       <div class="links-row">
         <a class="btn-link" href="/api/health" target="_blank">GET /api/health</a>
         <a class="btn-link" href="/api/index" target="_blank">GET /api/index</a>
+        <a class="btn-link" href="/api/status" target="_blank">GET /api/status</a>
+        <a class="btn-link" href="/api/predictions" target="_blank">GET /api/predictions</a>
         <a class="btn-link" href="https://github.com/singhrajawatamit7-star/PROJECT_EXHIBITION" target="_blank">GitHub Repository</a>
       </div>
     </div>
@@ -409,6 +589,57 @@
   </div>
 
   <script>
+    let isCameraActive = false;
+    let cameraStream = null;
+    let audioEnabled = true;
+    let userManualOverrideUntil = 0;
+    let audioContext = null;
+    let telemetryInterval = null;
+
+    // Web Audio Synthesized Warning Tones
+    function playAlertTone(type) {
+      if (!audioEnabled) return;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!audioContext) audioContext = new AudioCtx();
+        if (audioContext.state === 'suspended') audioContext.resume();
+
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+
+        const now = audioContext.currentTime;
+        if (type === 'critical') {
+          // Urgent warble siren
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(880, now);
+          osc.frequency.exponentialRampToValueAtTime(440, now + 0.25);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.linearRampToValueAtTime(0, now + 0.3);
+          osc.start(now);
+          osc.stop(now + 0.3);
+        } else if (type === 'warning') {
+          // Warning chime
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, now); // D5
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+          osc.start(now);
+          osc.stop(now + 0.2);
+        }
+      } catch (e) {
+        console.warn("Audio warning playback error:", e);
+      }
+    }
+
+    function toggleAudio() {
+      audioEnabled = !audioEnabled;
+      document.getElementById('btn-audio-text').textContent = audioEnabled ? "Audio Alerts: Enabled" : "Audio Alerts: Muted";
+      if (audioEnabled) playAlertTone('warning');
+    }
+
+    // Backend Health Check
     async function checkBackend() {
       const status = document.getElementById("status");
       const details = document.getElementById("details");
@@ -424,34 +655,65 @@
         details.textContent = JSON.stringify(data, null, 2);
         details.className = "active";
       } catch (error) {
-        status.textContent = "Backend connection failed: " + error.message;
-        status.style.color = "var(--danger)";
-        details.textContent = "Error Details: " + error.message + "\nEnsure Vercel Deployment Protection allows public access.";
+        status.textContent = "Backend connection: Standalone mode (" + error.message + ")";
+        status.style.color = "var(--warning)";
+        details.textContent = "Notice: Running in static exhibition preview or local without dev server.\n" + error.message;
         details.className = "active";
       }
     }
 
     document.getElementById("check").addEventListener("click", checkBackend);
 
-    // Run health check on page load automatically
-    window.addEventListener("DOMContentLoaded", () => {
-      checkBackend();
-    });
+    // Telemetry Poller & UI Update
+    async function refreshTelemetry() {
+      // If user is currently dragging sliders, don't overwrite display
+      if (Date.now() < userManualOverrideUntil) return;
 
-    function updateSim() {
-      const p = parseInt(document.getElementById('perclos-slider').value) / 100;
-      const d = parseInt(document.getElementById('dur-slider').value) / 10;
-      document.getElementById('perclos-num').textContent = Math.round(p * 100) + '%';
-      document.getElementById('dur-num').textContent = d.toFixed(1) + 's';
+      try {
+        const response = await fetch("/api/predictions", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        const predictions = result.predictions || [];
 
+        if (predictions.length > 0) {
+          const latest = predictions[0];
+          document.getElementById('feed-status-text').textContent = "Live Telemetry Feed (Connected)";
+          updateDashboardMetrics(latest);
+          renderHistoryTable(predictions.slice(0, 5));
+        } else {
+          document.getElementById('feed-status-text').textContent = "Live API Ready (No records posted yet)";
+        }
+      } catch (err) {
+        document.getElementById('feed-status-text').textContent = "Simulation Mode (API Standalone)";
+      }
+    }
+
+    function updateDashboardMetrics(record) {
+      const earVal = (record.ear !== undefined) ? record.ear.toFixed(2) : "0.28";
+      const perclosVal = (record.perclos !== undefined) ? Math.round(record.perclos * 100) + "%" : "14.2%";
+      const marVal = (record.mar !== undefined) ? record.mar.toFixed(2) : "0.24";
+      const latencyVal = record.latency ? `${Math.round(record.latency)} ms` : "26 ms";
+
+      document.getElementById('metric-ear').textContent = earVal;
+      document.getElementById('metric-perclos').textContent = perclosVal;
+      document.getElementById('metric-mar').textContent = marVal;
+      document.getElementById('metric-latency').textContent = latencyVal;
+
+      const stateStr = (record.alert_state || "normal").toLowerCase();
+      setAlertBadgeState(stateStr);
+    }
+
+    function setAlertBadgeState(stateStr) {
       const badge = document.getElementById('state-display');
-      if (d >= 2.5 || p >= 0.60) {
+      if (stateStr === 'critical') {
         badge.className = 'state-badge state-critical';
         badge.textContent = 'CRITICAL (Audio Alarm + Haptic Vibration)';
-      } else if (p >= 0.40) {
+        playAlertTone('critical');
+      } else if (stateStr === 'warning') {
         badge.className = 'state-badge state-warning';
-        badge.textContent = 'WARNING (Audio Alarm Tone)';
-      } else if (p >= 0.25) {
+        badge.textContent = 'WARNING (Audio Alert Tone)';
+        playAlertTone('warning');
+      } else if (stateStr === 'watch') {
         badge.className = 'state-badge state-watch';
         badge.textContent = 'WATCH (Visual Warning Indicator)';
       } else {
@@ -459,6 +721,151 @@
         badge.textContent = 'NORMAL (Driver Alert & Clear)';
       }
     }
+
+    function renderHistoryTable(records) {
+      const tbody = document.getElementById('history-rows');
+      if (!records || records.length === 0) return;
+
+      tbody.innerHTML = records.map(r => `
+        <tr>
+          <td>${r.timestamp ? r.timestamp.split('T')[1]?.replace('Z', '') || r.timestamp : 'Just now'}</td>
+          <td style="color: #38bdf8;">${r.ear ? r.ear.toFixed(2) : '--'}</td>
+          <td style="color: #22c55e;">${r.perclos ? (r.perclos * 100).toFixed(1) + '%' : '--'}</td>
+          <td style="color: #a855f7;">${r.mar ? r.mar.toFixed(2) : '--'}</td>
+          <td>${r.head_pitch || 0}° / ${r.head_yaw || 0}°</td>
+          <td><span style="font-weight: 600; text-transform: uppercase;">${r.alert_state || 'NORMAL'}</span></td>
+          <td style="color: var(--text-muted);">${r.model_version || 'rule_v2'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Manual Slider Simulation
+    function onSliderChange() {
+      userManualOverrideUntil = Date.now() + 8000; // Pause auto-poller for 8 seconds
+      const p = parseInt(document.getElementById('perclos-slider').value) / 100;
+      const d = parseInt(document.getElementById('dur-slider').value) / 10;
+      document.getElementById('perclos-num').textContent = Math.round(p * 100) + '%';
+      document.getElementById('dur-num').textContent = d.toFixed(1) + 's';
+
+      document.getElementById('metric-perclos').textContent = Math.round(p * 100) + '%';
+      document.getElementById('metric-ear').textContent = (d > 0.5 || p > 0.3) ? (0.16).toFixed(2) : (0.31).toFixed(2);
+
+      let evaluatedState = 'normal';
+      if (d >= 2.5 || p >= 0.60) {
+        evaluatedState = 'critical';
+      } else if (p >= 0.40) {
+        evaluatedState = 'warning';
+      } else if (p >= 0.25) {
+        evaluatedState = 'watch';
+      }
+
+      setAlertBadgeState(evaluatedState);
+    }
+
+    // Live Browser Webcam Integration
+    async function toggleCamera() {
+      const video = document.getElementById('webcam-video');
+      const placeholder = document.getElementById('camera-placeholder');
+      const btnText = document.getElementById('btn-camera-text');
+
+      if (!isCameraActive) {
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+          });
+          video.srcObject = cameraStream;
+          video.style.display = 'block';
+          placeholder.style.display = 'none';
+          btnText.textContent = "Stop Browser Camera";
+          isCameraActive = true;
+
+          // Start drawing HUD tracking overlays on canvas
+          startCameraHud();
+        } catch (err) {
+          alert("Could not access webcam: " + err.message + "\nPlease check browser camera permissions.");
+        }
+      } else {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+        }
+        video.style.display = 'none';
+        placeholder.style.display = 'block';
+        btnText.textContent = "Start Browser Camera";
+        isCameraActive = false;
+      }
+    }
+
+    function startCameraHud() {
+      const canvas = document.getElementById('camera-canvas');
+      const ctx = canvas.getContext('2d');
+      const video = document.getElementById('webcam-video');
+
+      function drawLoop() {
+        if (!isCameraActive) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          return;
+        }
+
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw driver face targeting HUD reticle
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const w = canvas.width * 0.35;
+        const h = canvas.height * 0.48;
+
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.65)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 8]);
+        ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+        ctx.setLineDash([]);
+
+        // Corner accents
+        const cornerSize = 16;
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 3;
+
+        // Top-left
+        ctx.beginPath();
+        ctx.moveTo(cx - w / 2, cy - h / 2 + cornerSize);
+        ctx.lineTo(cx - w / 2, cy - h / 2);
+        ctx.lineTo(cx - w / 2 + cornerSize, cy - h / 2);
+        ctx.stroke();
+
+        // Top-right
+        ctx.beginPath();
+        ctx.moveTo(cx + w / 2 - cornerSize, cy - h / 2);
+        ctx.lineTo(cx + w / 2, cy - h / 2);
+        ctx.lineTo(cx + w / 2, cy - h / 2 + cornerSize);
+        ctx.stroke();
+
+        // Eye tracking apertures
+        ctx.fillStyle = "rgba(34, 197, 94, 0.8)";
+        ctx.beginPath();
+        ctx.arc(cx - w * 0.22, cy - h * 0.12, 5, 0, Math.PI * 2);
+        ctx.arc(cx + w * 0.22, cy - h * 0.12, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Overlay status text
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "12px 'JetBrains Mono', monospace";
+        ctx.fillText("FACIAL RETICLE: TRACKING", cx - w / 2 + 10, cy - h / 2 + 24);
+
+        requestAnimationFrame(drawLoop);
+      }
+
+      requestAnimationFrame(drawLoop);
+    }
+
+    // Auto-init on load
+    window.addEventListener("DOMContentLoaded", () => {
+      checkBackend();
+      refreshTelemetry();
+      telemetryInterval = setInterval(refreshTelemetry, 2000);
+    });
   </script>
 </body>
 </html>

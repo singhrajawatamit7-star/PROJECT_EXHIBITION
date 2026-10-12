@@ -1,8 +1,15 @@
-from fatigue_monitor import FatigueMonitor
-import argparse
 import sys
+import argparse
 import time
 from pathlib import Path
+
+# Ensure current directory and project root are in sys.path
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+project_root = current_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 # Safe import of CV libraries
 try:
@@ -16,11 +23,6 @@ try:
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
-
-# Ensure parent directory is in sys.path when running as script
-current_dir = Path(__file__).resolve().parent
-if str(current_dir) not in sys.path:
-    sys.path.insert(0, str(current_dir))
 
 from camera import Camera
 from landmarks import FaceLandmarkDetector
@@ -157,6 +159,7 @@ def main():
     parser.add_argument("--camera", default=DEFAULT_CAMERA_INDEX, help="Camera index or video file path")
     parser.add_argument("--no-gui", action="store_true", help="Run without graphical display (headless mode)")
     parser.add_argument("--max-frames", type=int, default=None, help="Stop execution after N frames (testing)")
+    parser.add_argument("--telemetry-url", default=None, help="Remote HTTP API endpoint to POST live telemetry (e.g. http://127.0.0.1:8000/api/predictions)")
     args = parser.parse_args()
 
     if not HAS_CV2:
@@ -174,6 +177,17 @@ def main():
         camera_source = int(camera_source)
     except ValueError:
         pass
+
+    # Load trained machine learning model if available
+    rf_model = None
+    rf_model_path = current_dir.parent / "models" / "trained" / "drowsiness_random_forest.joblib"
+    if rf_model_path.exists():
+        try:
+            import joblib
+            rf_model = joblib.load(rf_model_path)
+            print(f"[Driver Drowsiness AI] Loaded trained Random Forest model from {rf_model_path}")
+        except Exception as e:
+            print(f"[Driver Drowsiness AI] Could not load ML model ({e}). Continuing with rule-based engine.")
 
     print("[Driver Drowsiness AI] Initializing Edge-AI runtime modules...")
     camera = Camera(camera_source=camera_source, width=FRAME_WIDTH, height=FRAME_HEIGHT)
@@ -248,16 +262,31 @@ def main():
             # Update supplementary fatigue indicators (yawn & head-droop)
             fatigue_risk, fatigue_reasons = fatigue_monitor.update(mar, pitch, face_present=face_present)
 
-            # Evaluate state safely based on face presence
+            # Evaluate state safely based on face presence and ML classifier
+            model_tag = "rule_v2"
             if not face_present:
                 alert_state_str = "no_face"
                 state = AlertState.NORMAL
             else:
                 closed_duration = perclos_tracker.get_current_closed_duration()
+
+                # ML Random Forest Inference scoring if model is loaded
+                ml_risk = None
+                if rf_model is not None:
+                    try:
+                        feat_row = [[ear, perclos, mar, closed_duration, pitch, yaw]]
+                        prob = float(rf_model.predict_proba(feat_row)[0][1])
+                        ml_risk = prob
+                        model_tag = "random_forest_v1"
+                    except Exception:
+                        pass
+
+                effective_risk = max(fatigue_risk, ml_risk) if ml_risk is not None else fatigue_risk
+
                 state = controller.update(
                     perclos,
                     continuous_closed_seconds=closed_duration,
-                    external_risk_score=fatigue_risk,
+                    external_risk_score=effective_risk,
                 )
                 alert_state_str = state.value
 
@@ -281,8 +310,30 @@ def main():
                 mar=mar,
                 head_pitch=pitch,
                 head_yaw=yaw,
-                model_version="rule_v2"
+                model_version=model_tag
             )
+
+            # Remote API Telemetry Uplink (if --telemetry-url is provided)
+            if args.telemetry_url and frame_count % 3 == 0:
+                try:
+                    import urllib.request
+                    uplink_data = json.dumps({
+                        "ear": ear,
+                        "perclos": perclos,
+                        "mar": mar,
+                        "head_pitch": pitch,
+                        "head_yaw": yaw,
+                        "alert_state": alert_state_str,
+                        "model_version": model_tag
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        args.telemetry_url,
+                        data=uplink_data,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    urllib.request.urlopen(req, timeout=0.1)
+                except Exception:
+                    pass
 
 
             # Latency and FPS computation
@@ -325,315 +376,13 @@ def main():
 import json
 
 
-DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Edge-AI Driver Drowsiness Monitor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #0a0d14;
-      --card-bg: rgba(18, 24, 38, 0.7);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --primary: #38bdf8;
-      --success: #22c55e;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --text: #f1f5f9;
-      --text-muted: #94a3b8;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Outfit', sans-serif;
-      background: radial-gradient(circle at 50% -20%, #1e293b, var(--bg) 80%);
-      color: var(--text);
-      min-height: 100vh;
-      padding: 2.5rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .container { width: 100%; max-width: 1040px; }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.4rem 0.9rem;
-      border-radius: 9999px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      background: rgba(34, 197, 94, 0.15);
-      color: var(--success);
-      border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-    .badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); }
-    h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em; }
-    p.subtitle { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.3rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 1rem;
-      padding: 1.5rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-    }
-    .card-label { font-size: 0.82rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-    .card-val { font-size: 1.8rem; font-weight: 700; margin: 0.5rem 0 0.2rem; font-family: 'JetBrains Mono', monospace; }
-    .card-sub { font-size: 0.8rem; color: var(--text-muted); }
-    .interactive-card { margin-bottom: 2rem; }
-    .slider-group { margin: 1.5rem 0; }
-    .slider-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.5rem; }
-    input[type=range] { width: 100%; height: 6px; border-radius: 3px; background: #334155; outline: none; -webkit-appearance: none; }
-    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--primary); cursor: pointer; }
-    .state-pill {
-      display: inline-block;
-      padding: 0.6rem 1.4rem;
-      border-radius: 0.5rem;
-      font-size: 1.1rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-top: 0.5rem;
-    }
-    .state-normal { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
-    .state-watch { background: rgba(245, 158, 11, 0.2); color: var(--warning); border: 1px solid var(--warning); }
-    .state-warning { background: rgba(249, 115, 22, 0.25); color: #f97316; border: 1px solid #f97316; }
-    .state-critical { background: rgba(239, 68, 68, 0.25); color: var(--danger); border: 1px solid var(--danger); animation: pulse 1s infinite alternate; }
-    @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; transform: scale(1.02); } }
-    .links-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
-    .api-btn {
-      padding: 0.5rem 1rem;
-      background: #1e293b;
-      border: 1px solid var(--card-border);
-      border-radius: 0.5rem;
-      color: var(--primary);
-      text-decoration: none;
-      font-size: 0.85rem;
-      font-family: 'JetBrains Mono', monospace;
-      transition: background 0.2s;
-    }
-    .api-btn:hover { background: #334155; }
-    footer { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 3rem; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <header>
-      <div>
-        <h1>Edge-AI Driver Monitor</h1>
-        <p class="subtitle">Real-time driver drowsiness detection & staged escalating alert system</p>
-      </div>
-      <div class="badge"><div class="badge-dot"></div> Edge-AI Online</div>
-    </header>
-
-    <div class="grid">
-      <div class="card">
-        <div class="card-label">Eye Aspect Ratio (EAR)</div>
-        <div class="card-val" style="color: #38bdf8;">0.28</div>
-        <div class="card-sub">Threshold: < 0.21 (Eyes Closed)</div>
-      </div>
-      <div class="card">
-        <div class="card-label">PERCLOS (30s Window)</div>
-        <div class="card-val" style="color: #22c55e;">12.4%</div>
-        <div class="card-sub">Warning: &ge; 40% | Critical: &ge; 60%</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Mouth Aspect Ratio (MAR)</div>
-        <div class="card-val" style="color: #a855f7;">0.22</div>
-        <div class="card-sub">Yawn Threshold: &ge; 0.65</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Inference Cycle</div>
-        <div class="card-val" style="color: #10b981;">28.5 ms</div>
-        <div class="card-sub">Target Latency: < 100 ms</div>
-      </div>
-    </div>
-
-    <div class="card interactive-card">
-      <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;">Interactive Alert State Machine Simulator</h3>
-      <p style="color: var(--text-muted); font-size: 0.85rem;">Simulate driver fatigue metrics to observe staged hysteresis and emergency triggers in real time.</p>
-      
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>PERCLOS Ratio (% Eye Closure)</span>
-          <span id="perclos-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">15%</span>
-        </div>
-        <input type="range" id="perclos-slider" min="0" max="100" value="15" oninput="updateSim()">
-      </div>
-
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>Continuous Eye Closure Duration (Microsleep)</span>
-          <span id="dur-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">0.0s</span>
-        </div>
-        <input type="range" id="dur-slider" min="0" max="50" value="0" step="1" oninput="updateSim()">
-      </div>
-
-      <div style="margin-top: 1.25rem;">
-        <span style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Evaluated State:</span>
-        <div id="state-display" class="state-pill state-normal">NORMAL (Clear to Drive)</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Cloud API Endpoints</h3>
-      <p style="color: var(--text-muted); font-size: 0.85rem;">Access real-time telemetry and database logs via REST endpoints:</p>
-      <div class="links-row">
-        <a class="api-btn" href="/health" target="_blank">GET /health</a>
-        <a class="api-btn" href="/api/status" target="_blank">GET /api/status</a>
-        <a class="api-btn" href="/api/predictions" target="_blank">GET /api/predictions</a>
-        <a class="api-btn" href="/api/alerts" target="_blank">GET /api/alerts</a>
-      </div>
-    </div>
-
-    <footer>
-      Edge-AI Driver Drowsiness Detection System &bull; <a href="https://github.com/singhrajawatamit7-star/PROJECT_EXHIBITION" target="_blank" style="color: var(--primary); text-decoration: none;">GitHub Repository</a>
-    </footer>
-  </div>
-
-  <script>
-    function updateSim() {
-      const p = parseInt(document.getElementById('perclos-slider').value) / 100;
-      const d = parseInt(document.getElementById('dur-slider').value) / 10;
-      document.getElementById('perclos-num').textContent = Math.round(p * 100) + '%';
-      document.getElementById('dur-num').textContent = d.toFixed(1) + 's';
-
-      const pill = document.getElementById('state-display');
-      if (d >= 2.5 || p >= 0.60) {
-        pill.className = 'state-pill state-critical';
-        pill.textContent = 'CRITICAL (Audio + Visual + Haptic Alert)';
-      } else if (p >= 0.40) {
-        pill.className = 'state-pill state-warning';
-        pill.textContent = 'WARNING (Audio Alarm)';
-      } else if (p >= 0.25) {
-        pill.className = 'state-pill state-watch';
-        pill.textContent = 'WATCH (Visual Indicator)';
-      } else {
-        pill.className = 'state-pill state-normal';
-        pill.textContent = 'NORMAL (Driver Alert)';
-      }
-    }
-  </script>
-</body>
-</html>
-"""
+DASHBOARD_HTML = """<!-- Telemetry dashboard served via root index.html -->"""
 
 
 def create_wsgi_app():
-    """
-    Standard WSGI/HTTP callable for cloud serverless deployments (Vercel, Render, Gunicorn).
-    Provides health-check, telemetry, threshold parameters, and prediction query endpoints.
-    """
-    def wsgi_handler(environ, start_response):
-        path = environ.get('PATH_INFO', '/') or '/'
-        method = environ.get('REQUEST_METHOD', 'GET')
-        accept = environ.get('HTTP_ACCEPT', '')
-
-        # HTML landing page for browser requests
-        if path == '/' and 'text/html' in accept:
-            headers = [
-                ('Content-Type', 'text/html; charset=utf-8'),
-                ('Access-Control-Allow-Origin', '*'),
-            ]
-            start_response('200 OK', headers)
-            return [DASHBOARD_HTML.encode('utf-8')]
-
-        headers = [
-            ('Content-Type', 'application/json'),
-            ('Access-Control-Allow-Origin', '*'),
-            ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
-            ('Access-Control-Allow-Headers', 'Content-Type'),
-        ]
-
-        if method == 'OPTIONS':
-            start_response('204 No Content', headers)
-            return [b'']
-
-        if path in ['/', '/health']:
-            payload = {
-                "status": "online",
-                "service": "driver-drowsiness-ai",
-                "version": "1.0.0",
-                "description": "Edge-AI Driver Drowsiness Detection and Alert System",
-                "endpoints": {
-                    "/health": "Service health probe",
-                    "/api/status": "System threshold configurations",
-                    "/api/predictions": "Latest inference log records",
-                    "/api/alerts": "Recent alert notifications"
-                }
-            }
-            start_response('200 OK', headers)
-            return [json.dumps(payload, indent=2).encode('utf-8')]
-
-        elif path == '/api/status':
-            payload = {
-                "status": "ready",
-                "thresholds": {
-                    "ear_closed_threshold": EAR_CLOSED_THRESHOLD,
-                    "mar_yawn_threshold": MAR_YAWN_THRESHOLD,
-                    "perclos_watch_threshold": PERCLOS_WATCH_THRESHOLD,
-                    "perclos_warning_threshold": PERCLOS_WARNING_THRESHOLD,
-                    "perclos_critical_threshold": PERCLOS_CRITICAL_THRESHOLD,
-                    "perclos_window_seconds": PERCLOS_WINDOW_SECONDS,
-                    "alert_cooldown_seconds": ALERT_COOLDOWN_SECONDS
-                }
-            }
-            start_response('200 OK', headers)
-            return [json.dumps(payload, indent=2).encode('utf-8')]
-
-        elif path == '/api/predictions':
-            preds = []
-            try:
-                db = Database(database_path=DATABASE_PATH, async_mode=False)
-                recent = db.get_recent_predictions(limit=15)
-                db.close()
-                for r in recent:
-                    preds.append({
-                        "timestamp": r[0],
-                        "perclos": r[1],
-                        "ear": r[2],
-                        "alert_state": r[3]
-                    })
-            except Exception as e:
-                preds = []
-            start_response('200 OK', headers)
-            return [json.dumps({"predictions": preds}).encode('utf-8')]
-
-        elif path == '/api/alerts':
-            alerts = []
-            try:
-                db = Database(database_path=DATABASE_PATH, async_mode=False)
-                recent = db.get_recent_alerts(limit=15)
-                db.close()
-                for r in recent:
-                    alerts.append({
-                        "timestamp": r[0],
-                        "level": r[1],
-                        "channel": r[2]
-                    })
-            except Exception as e:
-                alerts = []
-            start_response('200 OK', headers)
-            return [json.dumps({"alerts": alerts}).encode('utf-8')]
-
-        else:
-            start_response('404 Not Found', headers)
-            return [json.dumps({"error": "Route not found", "path": path}).encode('utf-8')]
-
-    return wsgi_handler
+    """Delegates WSGI requests to the dedicated api.index service."""
+    from api.index import application
+    return application
 
 
 # Export top-level variables required by Vercel, AWS Lambda, and WSGI servers:
