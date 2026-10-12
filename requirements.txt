@@ -1,13 +1,4 @@
-opencv-python>=4.8.0
-mediapipe>=0.10.0
+# Cloud & Serverless Deployment Dependencies (Vercel, AWS Lambda, Render)
+# Optimized to remain well under the 500 MB serverless uncompressed bundle limit (~35 MB).
+# For local camera & edge AI runtime with full OpenCV/MediaPipe, install requirements-local.txt.
 numpy>=1.24.0
-pandas>=2.0.0
-scipy>=1.11.0
-pygame>=2.5.0
-sqlalchemy>=2.0.0
-onnxruntime>=1.16.0
-scikit-learn>=1.3.0
-joblib>=1.3.0
-pytest>=7.4.0
-# Optional hardware dependency for Raspberry Pi GPIO alerts:
-# gpiozero>=2.0.0

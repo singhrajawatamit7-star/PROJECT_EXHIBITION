@@ -1,0 +1,11 @@
+.git
+.github
+data/raw/
+data/processed/
+models/trained/
+models/exported/
+tests/
+requirements-local.txt
+*.mp4
+*.avi
+*.joblib

@@ -135,7 +135,14 @@ source .venv/bin/activate
 
 ### Step 2: Install Dependencies
 
+**For Local Webcam, Edge-AI & Computer Vision Runtime (Recommended for hardware testing):**
 ```bash
+pip install -r requirements-local.txt
+```
+
+**For Cloud Serverless Deployment (Vercel, AWS Lambda, Render):**
+```bash
+# Uses lightweight dependencies (~35 MB) to stay well under Vercel's 500 MB limit
 pip install -r requirements.txt
 ```
 
