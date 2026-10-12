@@ -57,20 +57,33 @@ class AlertController:
             return AlertState.WATCH
         return AlertState.NORMAL
 
-    def update(self, perclos_score, continuous_closed_seconds=0.0, current_time=None):
+    def update(
+        self,
+        perclos_score,
+        continuous_closed_seconds=0.0,
+        current_time=None,
+        external_risk_score=0.0,
+    ):
         """
         Evaluates current score and sustained duration, returning current active AlertState.
         """
         now = time.time() if current_time is None else current_time
 
+        # PERCLOS remains a separate measured metric.
+        # External risk is a supplementary heuristic, not PERCLOS.
+        decision_score = max(
+            float(perclos_score),
+            float(external_risk_score),
+        )
+
         # Fast-track microsleep emergency: eyes continuously closed >= 2.5 seconds
         if continuous_closed_seconds >= 2.5:
             proposed = AlertState.CRITICAL
-        elif perclos_score >= self.critical_threshold:
+        elif decision_score >= self.critical_threshold:
             proposed = AlertState.CRITICAL
-        elif perclos_score >= self.warning_threshold:
+        elif decision_score >= self.warning_threshold:
             proposed = AlertState.WARNING
-        elif perclos_score >= self.watch_threshold:
+        elif decision_score >= self.watch_threshold:
             proposed = AlertState.WATCH
         else:
             proposed = AlertState.NORMAL

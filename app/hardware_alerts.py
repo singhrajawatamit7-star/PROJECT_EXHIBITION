@@ -1,41 +1,53 @@
-
-# app/hardware_alerts.py
-from gpiozero import LED, Buzzer
+"""
+Optional Raspberry Pi GPIO alerts module.
+Controls an active buzzer and LED indicators via GPIO pins when running on compatible hardware.
+Falls back safely if GPIO/gpiozero is unavailable.
+"""
 
 
 class HardwareAlerts:
-    """
-    Raspberry Pi GPIO output controller.
-
-    Example wiring:
-      GPIO17 -> LED resistor -> LED -> GND
-      GPIO27 -> compatible active buzzer module -> GND
-
-    Check your specific hardware ratings and wiring.
-    Do not drive a high-current motor directly from a GPIO pin.
-    """
-
     def __init__(self, led_pin=17, buzzer_pin=27):
-        self.led = LED(led_pin)
-        self.buzzer = Buzzer(buzzer_pin)
+        try:
+            from gpiozero import LED, Buzzer
+            self.led = LED(led_pin)
+            self.buzzer = Buzzer(buzzer_pin)
+            self.enabled = True
+        except Exception:
+            self.led = None
+            self.buzzer = None
+            self.enabled = False
 
-    def trigger(self, level):
-        level = str(getattr(level, "value", level)).lower()
-
-        if level == "normal":
+    def set_state(self, state):
+        # state: normal, watch, warning, critical, no_face
+        if not self.enabled:
+            return
+        state = str(getattr(state, "value", state)).lower()
+        if state == "normal":
+            self.led.off()
+            self.buzzer.off()
+        elif state == "watch":
+            self.led.on()
+            self.buzzer.off()
+        elif state in ("warning", "critical"):
+            self.led.on()
+            self.buzzer.on()
+        else:
+            # Monitoring unavailable: avoid implying
+            # that the driver has been verified as alert.
             self.led.off()
             self.buzzer.off()
 
-        elif level == "watch":
-            self.led.on()
-            self.buzzer.off()
-
-        elif level in ("warning", "critical"):
-            self.led.on()
-            self.buzzer.on()
+    def trigger(self, level):
+        """Alias for set_state for backward compatibility."""
+        self.set_state(level)
 
     def close(self):
-        self.buzzer.off()
-        self.led.off()
-        self.led.close()
-        self.buzzer.close()
+        if not self.enabled:
+            return
+        try:
+            self.buzzer.off()
+            self.led.off()
+            self.buzzer.close()
+            self.led.close()
+        except Exception:
+            pass

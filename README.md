@@ -76,6 +76,9 @@ driver-drowsiness-ai/
 │   ├── perclos.py            # Sliding window PERCLOS and blink tracker
 │   ├── alert_controller.py   # Staged alert state machine with hysteresis
 │   ├── alerts.py             # Audio tone synthesis and multi-modal actuator
+│   ├── fatigue_monitor.py    # Combines supplementary fatigue indicators (yawn & droop)
+│   ├── hardware_alerts.py    # Optional physical GPIO LED and buzzer output
+│   ├── test_camera.py        # Direct camera hardware diagnostic utility
 │   ├── database.py           # Asynchronous SQLite event and metrics recorder
 │   ├── main.py               # Main application entry point with HUD overlay
 │   └── simulate.py           # Driver fatigue session simulator & dataset generator
@@ -91,14 +94,21 @@ driver-drowsiness-ai/
 │   ├── exported/             # Optimized edge binaries (TensorRT, TFLite)
 │   └── train_baseline.py     # Machine learning training pipeline
 │
+├── api/
+│   └── index.py              # Cloud serverless WSGI deployment entrypoint (Vercel, AWS Lambda)
+│
 ├── tests/
 │   ├── __init__.py
 │   ├── test_features.py      # Unit tests for EAR, MAR, distance metrics
 │   ├── test_perclos.py       # Unit tests for rolling window and eviction
 │   ├── test_alert_controller.py # Tests for staged alerts and cooldowns
+│   ├── test_fatigue_monitor.py  # Tests for sustained yawn, droop, and face loss
+│   ├── test_hardware_alerts.py # Tests for physical/simulated GPIO hardware alerts
 │   └── test_database.py      # Tests for synchronous and asynchronous logging
 │
 ├── requirements.txt          # Python dependencies
+├── requirements-local.txt    # Local dependencies with OpenCV and MediaPipe
+├── vercel.json               # Cloud serverless routing configuration
 ├── README.md
 └── .gitignore
 ```
@@ -197,7 +207,39 @@ pytest tests/ -v
 
 ---
 
-## 6. Privacy & Safety Guidelines
+## 6. Additional Fatigue Monitoring
+
+The system combines eye-closure measurements with supplementary indicators for sustained yawning and head drooping. These signals are heuristic indicators and do not independently establish that a driver is drowsy.
+
+### Camera Test
+
+```bash
+python app/test_camera.py
+```
+
+### Run the Detection System
+
+```bash
+python app/main.py
+```
+
+### Run the Unit Tests
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+### Limitations
+
+- **Thresholds require calibration** for different users, cameras and lighting conditions.
+- **Missing facial landmarks indicate unavailable monitoring**, not proof of alertness.
+- **Simulated camera frames** do not demonstrate real-world detection accuracy.
+- **Optional GPIO alerts** require compatible hardware and correct wiring.
+- This prototype is for research and controlled testing, not a certified vehicle safety system.
+
+---
+
+## 7. Privacy & Safety Guidelines
 
 - **Edge-First Processing**: All facial landmarks and video frames are analyzed locally in device memory and immediately discarded.
 - **Biometric Minimization**: Only extracted numerical features (`EAR`, `PERCLOS`, `MAR`) and alert logs are saved to SQLite. Raw camera video is never persisted unless explicitly configured for calibration.

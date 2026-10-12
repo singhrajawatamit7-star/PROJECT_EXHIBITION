@@ -66,6 +66,11 @@ class TestPerclosTracker(unittest.TestCase):
         self.assertEqual(tracker.total_blinks, 1)
         self.assertAlmostEqual(tracker.last_blink_duration, 2.6, places=4)
 
+    def test_get_perclos_alias(self):
+        tracker = PerclosTracker(window_seconds=30)
+        tracker.update(eyes_closed=True, timestamp=100.0)
+        self.assertEqual(tracker.get_perclos(), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

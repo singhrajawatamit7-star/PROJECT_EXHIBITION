@@ -110,6 +110,21 @@ class TestAlertController(unittest.TestCase):
         self.assertEqual(state2, AlertState.WATCH)
         self.assertEqual(controller.last_alert_time, 100.0)
 
+    def test_external_risk_score_escalation(self):
+        controller = AlertController(
+            watch_threshold=0.25,
+            warning_threshold=0.40,
+            critical_threshold=0.60,
+            warning_duration=2.0
+        )
+        t = 100.0
+        # low PERCLOS (0.10) but high external risk score (0.45) -> should propose WARNING
+        state = controller.update(0.10, current_time=t, external_risk_score=0.45)
+        self.assertEqual(state, AlertState.NORMAL)
+        # Sustained after 2.5s -> WARNING triggers
+        state = controller.update(0.10, current_time=t + 2.5, external_risk_score=0.45)
+        self.assertEqual(state, AlertState.WARNING)
+
 
 def test_critical_state():
     """Pytest top-level test runner matching Section 17 example."""

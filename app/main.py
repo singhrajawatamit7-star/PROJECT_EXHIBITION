@@ -29,6 +29,8 @@ from perclos import PerclosTracker
 from alert_controller import AlertController, AlertState
 from alerts import AlertActuator
 from database import Database
+from fatigue_monitor import FatigueMonitor
+from hardware_alerts import HardwareAlerts
 from config import (
     FRAME_WIDTH,
     FRAME_HEIGHT,
@@ -85,7 +87,8 @@ def draw_hud(frame, ear, mar, perclos, pitch, yaw, state_str, loop_ms, fps):
         "normal": (50, 205, 50),     # Vibrant Green
         "watch": (0, 215, 255),      # Amber/Yellow
         "warning": (0, 140, 255),    # Vibrant Orange
-        "critical": (30, 30, 255)    # Neon Red
+        "critical": (30, 30, 255),   # Neon Red
+        "no_face": (160, 160, 160),  # Neutral Grey (face unavailable)
     }
     badge_color = color_map.get(state_str, (200, 200, 200))
 
@@ -185,20 +188,10 @@ def main():
         critical_duration=CRITICAL_CONSECUTIVE_SECONDS,
         cooldown_seconds=ALERT_COOLDOWN_SECONDS
     )
-    camera = Camera(
-    camera_source=camera_source,
-    width=FRAME_WIDTH,
-    height=FRAME_HEIGHT,
-    fallback_synthetic=False,
-)
+    fatigue_monitor = FatigueMonitor(yawn_mar_threshold=MAR_YAWN_THRESHOLD)
+    hardware_alerts = HardwareAlerts()
     actuator = AlertActuator(sound_path=ALERT_SOUND_PATH)
     database = Database(database_path=DATABASE_PATH, async_mode=True)
-    fatigue_monitor = FatigueMonitor(
-    mar_threshold=MAR_YAWN_THRESHOLD,
-    yawn_seconds=1.2,
-    head_down_degrees=18.0,
-    head_down_seconds=1.5,
-)
 
     frame_count = 0
     prev_state = AlertState.NORMAL
@@ -224,97 +217,63 @@ def main():
             mar = 0.0
             pitch, yaw, roll = 0.0, 0.0, 0.0
             eyes_closed = False
+            perclos = 0.0
+            fatigue_risk = 0.0
+            fatigue_reasons = []
 
-            if landmarks is None:
-                # Missing face is NOT equivalent to an alert, awake driver.
-                alert_state_str = "no_face"
-                fatigue_signals = fatigue_monitor.update(
-                    mar=0.0,
-                    pitch=0.0,
-                    face_detected=False,
-                )
-            
-                # Do not insert false "eyes open" samples into PERCLOS.
-                perclos = getattr(main, "_last_perclos", 0.0)
-            
-            else:
-                # 1. Eye-closure measurement
-                left_eye = get_eye_points(
-                    landmarks, LEFT_EYE_IDS, width, height
-                )
-                right_eye = get_eye_points(
-                    landmarks, RIGHT_EYE_IDS, width, height
-                )
-            
+            face_present = landmarks is not None
+            if face_present:
+                # 1. Calculate EAR from the existing facial landmarks.
+                left_eye = get_eye_points(landmarks, LEFT_EYE_IDS, width, height)
+                right_eye = get_eye_points(landmarks, RIGHT_EYE_IDS, width, height)
                 left_ear = calculate_ear(left_eye)
                 right_ear = calculate_ear(right_eye)
                 ear = (left_ear + right_ear) / 2.0
                 eyes_closed = ear < EAR_CLOSED_THRESHOLD
-            
-                # 2. Mouth opening and head pose
+
+                # 2. Calculate mouth opening and head pose.
                 mouth_pts = get_mouth_points(landmarks, width, height)
                 mar = calculate_mar(mouth_pts)
-                pitch, yaw, roll = estimate_head_pose(
-                    landmarks, width, height
-                )
-            
-                # 3. Sustained fatigue-related signals
-                fatigue_signals = fatigue_monitor.update(
-                    mar=mar,
-                    pitch=pitch,
-                    face_detected=True,
-                )
-            
-                # 4. Update PERCLOS only when the face is available
+                pitch, yaw, roll = estimate_head_pose(landmarks, width, height)
+
+                # 3. Track eye closure only when a face is available.
                 perclos = perclos_tracker.update(eyes_closed)
-                main._last_perclos = perclos
-            
-                closed_duration = (
-                    perclos_tracker.get_current_closed_duration()
-                )
-            
-                # 5. Base decision from existing eye-closure controller
+
+                # 4. Draw facial contours for active tracking visualization
+                if HAS_CV2 and HAS_NUMPY:
+                    cv2.polylines(frame, [np.array(left_eye, dtype=np.int32)], True, (0, 255, 0), 1)
+                    cv2.polylines(frame, [np.array(right_eye, dtype=np.int32)], True, (0, 255, 0), 1)
+                    cv2.polylines(frame, [np.array(mouth_pts, dtype=np.int32)], True, (255, 150, 0), 1)
+
+            # Update supplementary fatigue indicators (yawn & head-droop)
+            fatigue_risk, fatigue_reasons = fatigue_monitor.update(mar, pitch, face_present=face_present)
+
+            # Evaluate state safely based on face presence
+            if not face_present:
+                alert_state_str = "no_face"
+                state = AlertState.NORMAL
+            else:
+                closed_duration = perclos_tracker.get_current_closed_duration()
                 state = controller.update(
                     perclos,
                     continuous_closed_seconds=closed_duration,
+                    external_risk_score=fatigue_risk,
                 )
-            
-                # 6. Add the new fatigue signals
-                # Sustained head drooping is treated as critical evidence.
-                # Yawning alone is only a warning-level indicator.
-                if fatigue_signals.head_drooping:
-                    state = AlertState.CRITICAL
-                elif fatigue_signals.yawning and state == AlertState.NORMAL:
-                    state = AlertState.WARNING
-            
                 alert_state_str = state.value
-            
-                # 7. Draw face tracking contours
-                if HAS_CV2 and HAS_NUMPY:
-                    cv2.polylines(
-                        frame, [np.array(left_eye, dtype=np.int32)],
-                        True, (0, 255, 0), 1
-                    )
-                    cv2.polylines(
-                        frame, [np.array(right_eye, dtype=np.int32)],
-                        True, (0, 255, 0), 1
-                    )
-                    cv2.polylines(
-                        frame, [np.array(mouth_pts, dtype=np.int32)],
-                        True, (255, 150, 0), 1
-                    )
-            
-            # 8. Trigger alerts only on state changes, not on every frame.
-            # Do not activate drowsiness alarms when the face is missing.
-            if alert_state_str != "no_face":
-                if alert_state_str != prev_state.value:
-                    if alert_state_str != "normal":
-                        actuator.trigger(alert_state_str)
-                        database.log_alert(alert_state_str, "audio")
-            
-                prev_state = state
-            
-            # 9. Log measurements. Use the current schema.
+
+            # Update physical GPIO hardware output if equipped
+            hardware_alerts.set_state(alert_state_str)
+
+            # 6. Physical & Acoustic Actuation
+            if state != AlertState.NORMAL and (state != prev_state or (time.time() - controller.last_alert_time) < 0.1):
+                actuator.trigger(state)
+                database.log_alert(alert_state_str, "audio")
+                if hardware_alerts.enabled:
+                    database.log_alert(alert_state_str, "led")
+
+            prev_state = state
+
+            # 7. Asynchronous Telemetry & Predictions Logging
             database.log_prediction(
                 perclos=perclos,
                 ear=ear,
@@ -322,7 +281,7 @@ def main():
                 mar=mar,
                 head_pitch=pitch,
                 head_yaw=yaw,
-                model_version="rules_v2",
+                model_version="rule_v2"
             )
 
 
@@ -354,6 +313,7 @@ def main():
         detector.close()
         database.close()
         actuator.close()
+        hardware_alerts.close()
         if HAS_CV2 and not args.no_gui:
             cv2.destroyAllWindows()
         print("[Driver Drowsiness AI] Shutdown completed successfully.")
@@ -365,6 +325,213 @@ def main():
 import json
 
 
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edge-AI Driver Drowsiness Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0d14;
+      --card-bg: rgba(18, 24, 38, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #38bdf8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: radial-gradient(circle at 50% -20%, #1e293b, var(--bg) 80%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2.5rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container { width: 100%; max-width: 1040px; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success); }
+    h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em; }
+    p.subtitle { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.3rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+    .card-label { font-size: 0.82rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .card-val { font-size: 1.8rem; font-weight: 700; margin: 0.5rem 0 0.2rem; font-family: 'JetBrains Mono', monospace; }
+    .card-sub { font-size: 0.8rem; color: var(--text-muted); }
+    .interactive-card { margin-bottom: 2rem; }
+    .slider-group { margin: 1.5rem 0; }
+    .slider-label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.5rem; }
+    input[type=range] { width: 100%; height: 6px; border-radius: 3px; background: #334155; outline: none; -webkit-appearance: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--primary); cursor: pointer; }
+    .state-pill {
+      display: inline-block;
+      padding: 0.6rem 1.4rem;
+      border-radius: 0.5rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 0.5rem;
+    }
+    .state-normal { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
+    .state-watch { background: rgba(245, 158, 11, 0.2); color: var(--warning); border: 1px solid var(--warning); }
+    .state-warning { background: rgba(249, 115, 22, 0.25); color: #f97316; border: 1px solid #f97316; }
+    .state-critical { background: rgba(239, 68, 68, 0.25); color: var(--danger); border: 1px solid var(--danger); animation: pulse 1s infinite alternate; }
+    @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; transform: scale(1.02); } }
+    .links-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+    .api-btn {
+      padding: 0.5rem 1rem;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 0.5rem;
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-family: 'JetBrains Mono', monospace;
+      transition: background 0.2s;
+    }
+    .api-btn:hover { background: #334155; }
+    footer { text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 3rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Edge-AI Driver Monitor</h1>
+        <p class="subtitle">Real-time driver drowsiness detection & staged escalating alert system</p>
+      </div>
+      <div class="badge"><div class="badge-dot"></div> Edge-AI Online</div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-label">Eye Aspect Ratio (EAR)</div>
+        <div class="card-val" style="color: #38bdf8;">0.28</div>
+        <div class="card-sub">Threshold: < 0.21 (Eyes Closed)</div>
+      </div>
+      <div class="card">
+        <div class="card-label">PERCLOS (30s Window)</div>
+        <div class="card-val" style="color: #22c55e;">12.4%</div>
+        <div class="card-sub">Warning: &ge; 40% | Critical: &ge; 60%</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Mouth Aspect Ratio (MAR)</div>
+        <div class="card-val" style="color: #a855f7;">0.22</div>
+        <div class="card-sub">Yawn Threshold: &ge; 0.65</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Inference Cycle</div>
+        <div class="card-val" style="color: #10b981;">28.5 ms</div>
+        <div class="card-sub">Target Latency: < 100 ms</div>
+      </div>
+    </div>
+
+    <div class="card interactive-card">
+      <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;">Interactive Alert State Machine Simulator</h3>
+      <p style="color: var(--text-muted); font-size: 0.85rem;">Simulate driver fatigue metrics to observe staged hysteresis and emergency triggers in real time.</p>
+      
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>PERCLOS Ratio (% Eye Closure)</span>
+          <span id="perclos-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">15%</span>
+        </div>
+        <input type="range" id="perclos-slider" min="0" max="100" value="15" oninput="updateSim()">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Continuous Eye Closure Duration (Microsleep)</span>
+          <span id="dur-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">0.0s</span>
+        </div>
+        <input type="range" id="dur-slider" min="0" max="50" value="0" step="1" oninput="updateSim()">
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <span style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Evaluated State:</span>
+        <div id="state-display" class="state-pill state-normal">NORMAL (Clear to Drive)</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">Cloud API Endpoints</h3>
+      <p style="color: var(--text-muted); font-size: 0.85rem;">Access real-time telemetry and database logs via REST endpoints:</p>
+      <div class="links-row">
+        <a class="api-btn" href="/health" target="_blank">GET /health</a>
+        <a class="api-btn" href="/api/status" target="_blank">GET /api/status</a>
+        <a class="api-btn" href="/api/predictions" target="_blank">GET /api/predictions</a>
+        <a class="api-btn" href="/api/alerts" target="_blank">GET /api/alerts</a>
+      </div>
+    </div>
+
+    <footer>
+      Edge-AI Driver Drowsiness Detection System &bull; <a href="https://github.com/singhrajawatamit7-star/PROJECT_EXHIBITION" target="_blank" style="color: var(--primary); text-decoration: none;">GitHub Repository</a>
+    </footer>
+  </div>
+
+  <script>
+    function updateSim() {
+      const p = parseInt(document.getElementById('perclos-slider').value) / 100;
+      const d = parseInt(document.getElementById('dur-slider').value) / 10;
+      document.getElementById('perclos-num').textContent = Math.round(p * 100) + '%';
+      document.getElementById('dur-num').textContent = d.toFixed(1) + 's';
+
+      const pill = document.getElementById('state-display');
+      if (d >= 2.5 || p >= 0.60) {
+        pill.className = 'state-pill state-critical';
+        pill.textContent = 'CRITICAL (Audio + Visual + Haptic Alert)';
+      } else if (p >= 0.40) {
+        pill.className = 'state-pill state-warning';
+        pill.textContent = 'WARNING (Audio Alarm)';
+      } else if (p >= 0.25) {
+        pill.className = 'state-pill state-watch';
+        pill.textContent = 'WATCH (Visual Indicator)';
+      } else {
+        pill.className = 'state-pill state-normal';
+        pill.textContent = 'NORMAL (Driver Alert)';
+      }
+    }
+  </script>
+</body>
+</html>
+"""
+
+
 def create_wsgi_app():
     """
     Standard WSGI/HTTP callable for cloud serverless deployments (Vercel, Render, Gunicorn).
@@ -373,6 +540,16 @@ def create_wsgi_app():
     def wsgi_handler(environ, start_response):
         path = environ.get('PATH_INFO', '/') or '/'
         method = environ.get('REQUEST_METHOD', 'GET')
+        accept = environ.get('HTTP_ACCEPT', '')
+
+        # HTML landing page for browser requests
+        if path == '/' and 'text/html' in accept:
+            headers = [
+                ('Content-Type', 'text/html; charset=utf-8'),
+                ('Access-Control-Allow-Origin', '*'),
+            ]
+            start_response('200 OK', headers)
+            return [DASHBOARD_HTML.encode('utf-8')]
 
         headers = [
             ('Content-Type', 'application/json'),

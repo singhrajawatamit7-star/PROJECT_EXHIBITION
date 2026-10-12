@@ -47,6 +47,10 @@ class PerclosTracker:
         closed_count = sum(1 for _, closed in self.samples if closed)
         return float(closed_count / len(self.samples))
 
+    def get_perclos(self):
+        """Alias for calculate() to prevent attribute anomalies."""
+        return self.calculate()
+
     def get_sample_count(self):
         return len(self.samples)
 

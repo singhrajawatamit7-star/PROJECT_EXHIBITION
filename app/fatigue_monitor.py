@@ -1,91 +1,85 @@
+"""
+Fatigue Monitor Module
+Tracks sustained yawn and head droop indicators to calculate a supplementary heuristic risk score.
+"""
 
-# app/fatigue_monitor.py
 import time
-from dataclasses import dataclass
-
-
-@dataclass
-class FatigueSignals:
-    yawning: bool = False
-    head_drooping: bool = False
-    no_face: bool = False
 
 
 class FatigueMonitor:
     """
-    Tracks sustained fatigue-related signals.
-
-    Important:
-    - Calibrate MAR and pitch thresholds for your camera.
-    - This is a heuristic, not a medical or safety-certified detector.
+    Combines supplementary fatigue indicators such as sustained yawning and head drooping.
+    Provides a heuristic risk score (0 to 1), NOT a probability. It is separate from
+    the actual PERCLOS measurement.
     """
 
     def __init__(
         self,
-        mar_threshold=0.65,
-        yawn_seconds=1.2,
-        head_down_degrees=20.0,
-        head_down_seconds=1.5,
-        recovery_seconds=0.5,
+        yawn_mar_threshold=0.65,
+        yawn_duration=1.5,
+        head_pitch_threshold=15.0,
+        head_droop_duration=2.0,
+        mar_threshold=None,
+        yawn_seconds=None,
+        head_down_degrees=None,
+        head_down_seconds=None,
+        **kwargs,
     ):
-        self.mar_threshold = mar_threshold
-        self.yawn_seconds = yawn_seconds
-        self.head_down_degrees = head_down_degrees
-        self.head_down_seconds = head_down_seconds
-        self.recovery_seconds = recovery_seconds
+        self.yawn_mar_threshold = mar_threshold if mar_threshold is not None else yawn_mar_threshold
+        self.yawn_duration = yawn_seconds if yawn_seconds is not None else yawn_duration
+        self.head_pitch_threshold = head_down_degrees if head_down_degrees is not None else head_pitch_threshold
+        self.head_droop_duration = head_down_seconds if head_down_seconds is not None else head_droop_duration
+        self._yawn_start = None
+        self._droop_start = None
 
-        self._yawn_since = None
-        self._head_down_since = None
-        self._yawn_below_since = None
-        self._head_up_since = None
+    def reset(self):
+        """Clear temporal indicators when the face is unavailable."""
+        self._yawn_start = None
+        self._droop_start = None
 
-    def update(self, mar, pitch, face_detected, now=None):
+    def update(self, mar, pitch, face_present=True, now=None, face_detected=None):
+        """
+        Return (risk_score, reasons).
+        risk_score is a heuristic from 0 to 1, NOT a probability.
+        It is separate from the actual PERCLOS measurement.
+        """
+        if face_detected is not None:
+            face_present = face_detected
+
         now = time.monotonic() if now is None else now
+        if not face_present:
+            self.reset()
+            return 0.0, ["face_unavailable"]
 
-        if not face_detected:
-            # Do not interpret missing landmarks as an alert-free driver.
-            self._yawn_since = None
-            self._head_down_since = None
-            self._yawn_below_since = None
-            self._head_up_since = None
-
-            return FatigueSignals(no_face=True)
-
-        # Yawning: mouth opening sustained over time.
-        if mar >= self.mar_threshold:
-            if self._yawn_since is None:
-                self._yawn_since = now
-            self._yawn_below_since = None
+        # Track a sustained mouth opening.
+        if mar >= self.yawn_mar_threshold:
+            if self._yawn_start is None:
+                self._yawn_start = now
         else:
-            if self._yawn_below_since is None:
-                self._yawn_below_since = now
-            elif now - self._yawn_below_since >= self.recovery_seconds:
-                self._yawn_since = None
+            self._yawn_start = None
 
-        yawning = (
-            self._yawn_since is not None
-            and now - self._yawn_since >= self.yawn_seconds
-        )
-
-        # Head-down detection. Verify pitch sign and angle calibration
-        # with your own camera before using this rule.
-        if pitch >= self.head_down_degrees:
-            if self._head_down_since is None:
-                self._head_down_since = now
-            self._head_up_since = None
+        # Track a sustained downward head angle.
+        if pitch >= self.head_pitch_threshold:
+            if self._droop_start is None:
+                self._droop_start = now
         else:
-            if self._head_up_since is None:
-                self._head_up_since = now
-            elif now - self._head_up_since >= self.recovery_seconds:
-                self._head_down_since = None
+            self._droop_start = None
 
-        head_drooping = (
-            self._head_down_since is not None
-            and now - self._head_down_since >= self.head_down_seconds
-        )
+        score = 0.0
+        reasons = []
 
-        return FatigueSignals(
-            yawning=yawning,
-            head_drooping=head_drooping,
-            no_face=False,
-        )
+        if (
+            self._yawn_start is not None
+            and now - self._yawn_start >= self.yawn_duration
+        ):
+            score = max(score, 0.30)
+            reasons.append("sustained_yawn")
+
+        if (
+            self._droop_start is not None
+            and now - self._droop_start >= self.head_droop_duration
+        ):
+            score = max(score, 0.42)
+            reasons.append("sustained_head_droop")
+
+        return score, reasons

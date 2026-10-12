@@ -1,62 +1,48 @@
 """
-Standalone Camera Hardware Test Utility
-Verifies video capture feed and displays stream in a GUI window.
-Press 'q' to exit.
+Camera Hardware Diagnostic Utility
+Verifies real webcam hardware access directly with OpenCV VideoCapture.
+Unlike the main application's synthetic fallback, it fails clearly if the camera cannot be opened.
 """
 
-import sys
-from pathlib import Path
-
-# Add current directory to path
-current_dir = Path(__file__).resolve().parent
-if str(current_dir) not in sys.path:
-    sys.path.insert(0, str(current_dir))
+import argparse
 
 try:
     import cv2
-    HAS_CV2 = True
 except ImportError:
-    HAS_CV2 = False
-
-from camera import Camera
+    raise SystemExit("ERROR: OpenCV ('cv2') is required for camera diagnostic. Install it via 'pip install opencv-python'.")
 
 
 def main():
-    print("[Camera Test] Initializing camera device...")
-    camera = Camera(fallback_synthetic=True)
+    parser = argparse.ArgumentParser(description="Driver Drowsiness Camera Diagnostic")
+    parser.add_argument("--camera", type=int, default=0, help="Camera device index (default: 0)")
+    args = parser.parse_args()
 
-    if not HAS_CV2:
-        print("[Camera Test] OpenCV ('cv2') is not installed in the environment.")
-        print("To test camera with video display: pip install opencv-python")
-        print("Reading 5 test frames in headless mode...")
-        for i in range(5):
-            frame = camera.read()
-            print(f"  Frame {i+1} successfully read.")
-        camera.release()
-        print("[Camera Test] Headless verification passed.")
-        return
+    camera = cv2.VideoCapture(args.camera)
+    if not camera.isOpened():
+        raise SystemExit(f"ERROR: Cannot open camera index {args.camera}")
 
-    print("[Camera Test] Stream open. Press 'q' in the window to close.")
-    frame_count = 0
-
+    print(f"Camera index {args.camera} opened successfully. Press 'q' in the window to exit.")
     try:
         while True:
-            frame = camera.read()
-            if frame is None:
-                print("[Camera Test] Stream ended or camera disconnected.")
+            success, frame = camera.read()
+            if not success or frame is None:
+                print("ERROR: Failed to read camera frame.")
                 break
-
-            cv2.imshow("Driver Drowsiness - Camera Test", frame)
-
+            cv2.putText(
+                frame,
+                "CAMERA TEST: OK",
+                (20, 35),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+            )
+            cv2.imshow("Camera Diagnostic", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
-                print("[Camera Test] User pressed 'q'. Exiting.")
                 break
-
-            frame_count += 1
     finally:
         camera.release()
         cv2.destroyAllWindows()
-        print(f"[Camera Test] Session closed. Total frames processed: {frame_count}")
 
 
 if __name__ == "__main__":
