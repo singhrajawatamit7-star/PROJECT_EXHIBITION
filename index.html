@@ -668,6 +668,7 @@
     async function refreshTelemetry() {
       // If user is currently dragging sliders, don't overwrite display
       if (Date.now() < userManualOverrideUntil) return;
+      if (isCameraActive) return; // live camera drives the dashboard
 
       try {
         const response = await fetch("/api/predictions", { cache: "no-store" });
@@ -762,102 +763,210 @@
       setAlertBadgeState(evaluatedState);
     }
 
-    // Live Browser Webcam Integration
+    // ===== Live Browser Webcam + Real Face/Eye Detection (MediaPipe FaceLandmarker) =====
+    // All processing happens in the browser; video frames are never uploaded.
+    // Only numeric metrics (EAR, MAR, PERCLOS, state) are POSTed to /api/predictions and /api/alerts.
+    const DETECT = {
+      earClosed: 0.21,          // matches SYSTEM_THRESHOLDS in api/index.py
+      marYawn: 0.65,
+      perclosWindowMs: 30000,
+      perclosWatch: 0.25, perclosWarning: 0.40, perclosCritical: 0.60,
+      closeWatchSec: 1.0, closeWarningSec: 1.5, closeCriticalSec: 2.5,  // same values as the simulator
+      minPerclosSamplesMs: 5000, // don't judge PERCLOS until 5 s of data exist
+      beepRepeatMs: 3000,
+      postIntervalMs: 2000
+    };
+    const MP_VERSION = "0.10.22";
+    let landmarker = null, detectRaf = null, lastVideoTime = -1;
+    let samples = [];            // {t, closed}
+    let closedSince = null, yawnSince = null;
+    let currentState = "normal", lastBeepAt = 0, lastPostAt = 0, lastLatency = 0;
+
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    function eyeEAR(lm, i) { // i = [p1..p6] in Face Mesh order
+      return (dist(lm[i[1]], lm[i[5]]) + dist(lm[i[2]], lm[i[4]])) / (2 * dist(lm[i[0]], lm[i[3]]));
+    }
+    const LEFT_EYE = [33, 160, 158, 133, 153, 144];
+    const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
+
+    async function loadLandmarker() {
+      if (landmarker) return;
+      const base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
+      const mod = await import(base);
+      const vision = await mod.FilesetResolver.forVisionTasks(base + "/wasm");
+      landmarker = await mod.FaceLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+        runningMode: "VIDEO",
+        numFaces: 1
+      });
+    }
+
+    function stateRank(s) { return ["normal", "watch", "warning", "critical"].indexOf(s); }
+    function worst(a, b) { return stateRank(a) >= stateRank(b) ? a : b; }
+
+    function postJSON(url, body) {
+      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+    }
+
+    function evaluate(ear, mar, now) {
+      const closed = ear < DETECT.earClosed;
+      samples.push({ t: now, closed });
+      while (samples.length && now - samples[0].t > DETECT.perclosWindowMs) samples.shift();
+
+      // time-weighted PERCLOS over the rolling window
+      let closedMs = 0, totalMs = 0;
+      for (let i = 1; i < samples.length; i++) {
+        const dt = samples[i].t - samples[i - 1].t;
+        totalMs += dt;
+        if (samples[i - 1].closed) closedMs += dt;
+      }
+      const perclos = totalMs > 0 ? closedMs / totalMs : 0;
+
+      if (closed) { if (closedSince === null) closedSince = now; } else closedSince = null;
+      const closedSec = closedSince === null ? 0 : (now - closedSince) / 1000;
+      if (mar > DETECT.marYawn) { if (yawnSince === null) yawnSince = now; } else yawnSince = null;
+      const yawning = yawnSince !== null && (now - yawnSince) > 1000;
+
+      let st = "normal";
+      if (closedSec >= DETECT.closeCriticalSec) st = "critical";
+      else if (closedSec >= DETECT.closeWarningSec) st = "warning";
+      else if (closedSec >= DETECT.closeWatchSec) st = "watch";
+      if (totalMs >= DETECT.minPerclosSamplesMs) {
+        if (perclos >= DETECT.perclosCritical) st = worst(st, "critical");
+        else if (perclos >= DETECT.perclosWarning) st = worst(st, "warning");
+        else if (perclos >= DETECT.perclosWatch) st = worst(st, "watch");
+      }
+      if (yawning) st = worst(st, "watch");
+      return { perclos, st };
+    }
+
+    function detectLoop() {
+      if (!isCameraActive) return;
+      const video = document.getElementById('webcam-video');
+      const canvas = document.getElementById('camera-canvas');
+      const ctx = canvas.getContext('2d');
+
+      if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const t0 = performance.now();
+        const result = landmarker.detectForVideo(video, t0);
+        lastLatency = performance.now() - t0;
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const lm = result.faceLandmarks && result.faceLandmarks[0];
+        if (!lm) {
+          // No face: reset timers rather than guessing "awake" or "asleep"
+          closedSince = null; yawnSince = null;
+          ctx.fillStyle = "#f59e0b";
+          ctx.font = "14px 'JetBrains Mono', monospace";
+          ctx.fillText("NO FACE DETECTED - face the camera", 14, 28);
+          document.getElementById('feed-status-text').textContent = "Live Camera: no face detected";
+        } else {
+          const ear = (eyeEAR(lm, LEFT_EYE) + eyeEAR(lm, RIGHT_EYE)) / 2;
+          const mar = dist(lm[13], lm[14]) / dist(lm[78], lm[308]);
+          // Rough head pose from landmark geometry (informational only, not used for alerts)
+          const faceW = dist(lm[234], lm[454]);
+          const yaw = ((lm[1].x - (lm[234].x + lm[454].x) / 2) / faceW) * 90;
+          const eyeMidY = (lm[33].y + lm[263].y) / 2;
+          const pitch = (((lm[1].y - eyeMidY) / faceW) - 0.45) * 90;
+
+          const now = performance.now();
+          const { perclos, st } = evaluate(ear, mar, now);
+
+          // Draw tracked eye landmarks + bounding box
+          ctx.fillStyle = ear < DETECT.earClosed ? "#ef4444" : "#22c55e";
+          [...LEFT_EYE, ...RIGHT_EYE].forEach(i => {
+            ctx.beginPath(); ctx.arc(lm[i].x * canvas.width, lm[i].y * canvas.height, 2.5, 0, Math.PI * 2); ctx.fill();
+          });
+          ctx.fillStyle = "#38bdf8";
+          ctx.font = "13px 'JetBrains Mono', monospace";
+          ctx.fillText(`EAR ${ear.toFixed(2)}  MAR ${mar.toFixed(2)}  ${ear < DETECT.earClosed ? "EYES CLOSED" : "EYES OPEN"}`, 14, 24);
+
+          const record = {
+            timestamp: new Date().toISOString(), ear, mar, perclos,
+            head_pitch: pitch, head_yaw: yaw, alert_state: st,
+            model_version: "browser_mediapipe_ear", latency: lastLatency
+          };
+          document.getElementById('feed-status-text').textContent = "Live Camera Detection (browser, real-time)";
+          document.getElementById('metric-ear').textContent = ear.toFixed(2);
+          document.getElementById('metric-perclos').textContent = Math.round(perclos * 100) + "%";
+          document.getElementById('metric-mar').textContent = mar.toFixed(2);
+          document.getElementById('metric-latency').textContent = Math.round(lastLatency) + " ms";
+
+          // Badge/sound only on change, then repeat beep while elevated
+          const elevated = stateRank(st) >= 2;
+          if (st !== currentState) {
+            const escalated = stateRank(st) > stateRank(currentState);
+            currentState = st;
+            lastBeepAt = now;
+            setAlertBadgeState(st); // updates badge and plays tone for warning/critical
+            if (escalated && elevated) {
+              postJSON("/api/alerts", { timestamp: record.timestamp, level: st, channel: "browser_camera",
+                message: `Driver fatigue ${st}: EAR ${ear.toFixed(2)}, PERCLOS ${(perclos * 100).toFixed(0)}%` });
+            }
+          } else if (elevated && now - lastBeepAt > DETECT.beepRepeatMs) {
+            lastBeepAt = now;
+            playAlertTone(st);
+          }
+
+          if (now - lastPostAt > DETECT.postIntervalMs) {
+            lastPostAt = now;
+            postJSON("/api/predictions", record);
+            renderHistoryTable([record]);
+          }
+        }
+      }
+      detectRaf = requestAnimationFrame(detectLoop);
+    }
+
     async function toggleCamera() {
       const video = document.getElementById('webcam-video');
       const placeholder = document.getElementById('camera-placeholder');
+      const btn = document.getElementById('btn-camera');
       const btnText = document.getElementById('btn-camera-text');
 
       if (!isCameraActive) {
+        btn.disabled = true;
         try {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error("Camera access needs HTTPS (or localhost).");
+          }
+          btnText.textContent = "Loading face model...";
+          await loadLandmarker();
           cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }, audio: false
           });
           video.srcObject = cameraStream;
+          await video.play();
           video.style.display = 'block';
           placeholder.style.display = 'none';
           btnText.textContent = "Stop Browser Camera";
           isCameraActive = true;
-
-          // Start drawing HUD tracking overlays on canvas
-          startCameraHud();
+          samples = []; closedSince = null; yawnSince = null; currentState = "normal"; lastVideoTime = -1;
+          detectLoop();
         } catch (err) {
-          alert("Could not access webcam: " + err.message + "\nPlease check browser camera permissions.");
+          if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+          cameraStream = null;
+          btnText.textContent = "Start Browser Camera";
+          alert("Could not start detection: " + err.message + "\nCheck camera permission and internet access (the face model loads from a CDN).");
+        } finally {
+          btn.disabled = false;
         }
       } else {
-        if (cameraStream) {
-          cameraStream.getTracks().forEach(track => track.stop());
-        }
+        isCameraActive = false;
+        if (detectRaf) cancelAnimationFrame(detectRaf);
+        if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+        const canvas = document.getElementById('camera-canvas');
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
         video.style.display = 'none';
         placeholder.style.display = 'block';
         btnText.textContent = "Start Browser Camera";
-        isCameraActive = false;
+        setAlertBadgeState('normal');
+        currentState = "normal";
       }
-    }
-
-    function startCameraHud() {
-      const canvas = document.getElementById('camera-canvas');
-      const ctx = canvas.getContext('2d');
-      const video = document.getElementById('webcam-video');
-
-      function drawLoop() {
-        if (!isCameraActive) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          return;
-        }
-
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw driver face targeting HUD reticle
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-        const w = canvas.width * 0.35;
-        const h = canvas.height * 0.48;
-
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.65)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 8]);
-        ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
-        ctx.setLineDash([]);
-
-        // Corner accents
-        const cornerSize = 16;
-        ctx.strokeStyle = "#38bdf8";
-        ctx.lineWidth = 3;
-
-        // Top-left
-        ctx.beginPath();
-        ctx.moveTo(cx - w / 2, cy - h / 2 + cornerSize);
-        ctx.lineTo(cx - w / 2, cy - h / 2);
-        ctx.lineTo(cx - w / 2 + cornerSize, cy - h / 2);
-        ctx.stroke();
-
-        // Top-right
-        ctx.beginPath();
-        ctx.moveTo(cx + w / 2 - cornerSize, cy - h / 2);
-        ctx.lineTo(cx + w / 2, cy - h / 2);
-        ctx.lineTo(cx + w / 2, cy - h / 2 + cornerSize);
-        ctx.stroke();
-
-        // Eye tracking apertures
-        ctx.fillStyle = "rgba(34, 197, 94, 0.8)";
-        ctx.beginPath();
-        ctx.arc(cx - w * 0.22, cy - h * 0.12, 5, 0, Math.PI * 2);
-        ctx.arc(cx + w * 0.22, cy - h * 0.12, 5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Overlay status text
-        ctx.fillStyle = "#38bdf8";
-        ctx.font = "12px 'JetBrains Mono', monospace";
-        ctx.fillText("FACIAL RETICLE: TRACKING", cx - w / 2 + 10, cy - h / 2 + 24);
-
-        requestAnimationFrame(drawLoop);
-      }
-
-      requestAnimationFrame(drawLoop);
     }
 
     // Auto-init on load
