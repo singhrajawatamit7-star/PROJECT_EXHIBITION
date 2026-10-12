@@ -95,10 +95,12 @@ driver-drowsiness-ai/
 │   └── train_baseline.py     # Machine learning training pipeline
 │
 ├── api/
+│   ├── health.py             # Minimal, independent serverless health check probe
 │   └── index.py              # Cloud serverless WSGI deployment entrypoint (Vercel, AWS Lambda)
 │
 ├── tests/
 │   ├── __init__.py
+│   ├── test_api_health.py    # Unit tests for cloud health probe endpoint
 │   ├── test_features.py      # Unit tests for EAR, MAR, distance metrics
 │   ├── test_perclos.py       # Unit tests for rolling window and eviction
 │   ├── test_alert_controller.py # Tests for staged alerts and cooldowns
@@ -106,9 +108,11 @@ driver-drowsiness-ai/
 │   ├── test_hardware_alerts.py # Tests for physical/simulated GPIO hardware alerts
 │   └── test_database.py      # Tests for synchronous and asynchronous logging
 │
-├── requirements.txt          # Python dependencies
+├── index.html                # Root website frontend with telemetry & backend health checker
+├── requirements.txt          # Lightweight serverless dependencies (~35 MB)
 ├── requirements-local.txt    # Local dependencies with OpenCV and MediaPipe
 ├── vercel.json               # Cloud serverless routing configuration
+├── .vercelignore             # Exclusion rules for serverless bundle optimization
 ├── README.md
 └── .gitignore
 ```

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edge-AI Driver Drowsiness Detection System</title>
+  <meta name="description" content="Edge-AI Driver Drowsiness Detection and Alert System — Real-time telemetry, fatigue state machine, and health monitoring.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(17, 24, 39, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --orange: #f97316;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.1) 0px, transparent 50%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem;
+      flex: 1;
+      width: 100%;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2.25rem;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+    }
+
+    .header-title h1 {
+      font-size: 2.1rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 40%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-title p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-top: 0.25rem;
+    }
+
+    .badge-online {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 9999px;
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      color: var(--success);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .dot-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+      animation: pulse-dot 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.4);
+      margin-bottom: 1.5rem;
+    }
+
+    .card h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+    }
+
+    .card p.card-desc {
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      margin-bottom: 1.25rem;
+    }
+
+    /* Health Diagnostic Section */
+    .diagnostic-box {
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    #status {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--primary);
+    }
+
+    button#check {
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: white;
+      border: none;
+      padding: 0.65rem 1.4rem;
+      border-radius: 0.6rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    button#check:hover {
+      background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+      transform: translateY(-1px);
+    }
+
+    button#check:active {
+      transform: translateY(0);
+    }
+
+    pre#details {
+      background: #080c14;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 0.5rem;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 220px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    pre#details.active {
+      display: block;
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .metric-pill {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .metric-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0.25rem 0;
+    }
+
+    .metric-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Simulator */
+    .slider-group {
+      margin: 1.25rem 0;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.88rem;
+      margin-bottom: 0.4rem;
+    }
+
+    input[type=range] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #1e293b;
+      outline: none;
+      -webkit-appearance: none;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--primary);
+      cursor: pointer;
+      box-shadow: 0 0 10px var(--primary-glow);
+    }
+
+    .state-badge {
+      display: inline-block;
+      padding: 0.65rem 1.4rem;
+      border-radius: 0.6rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      margin-top: 0.5rem;
+      transition: all 0.3s ease;
+    }
+
+    .state-normal { background: rgba(34, 197, 94, 0.15); color: var(--success); border: 1px solid var(--success); }
+    .state-watch { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid var(--warning); }
+    .state-warning { background: rgba(249, 115, 22, 0.18); color: var(--orange); border: 1px solid var(--orange); }
+    .state-critical { 
+      background: rgba(239, 68, 68, 0.22); 
+      color: var(--danger); 
+      border: 1px solid var(--danger);
+      animation: alert-flash 1s infinite alternate;
+    }
+
+    @keyframes alert-flash {
+      from { box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+      to { box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
+    }
+
+    /* Links & Footer */
+    .links-row {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+
+    .btn-link {
+      padding: 0.5rem 0.9rem;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 0.5rem;
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-family: 'JetBrains Mono', monospace;
+      transition: background 0.2s;
+    }
+
+    .btn-link:hover {
+      background: #334155;
+    }
+
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--card-border);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-title">
+        <h1>Driver Drowsiness Detection</h1>
+        <p>Edge-AI Multi-Modal Driver Fatigue & Microsleep Monitoring System</p>
+      </div>
+      <div class="badge-online">
+        <div class="dot-pulse"></div>
+        <span>Edge-AI Online</span>
+      </div>
+    </header>
+
+    <!-- Health Probe Diagnostic Card -->
+    <div class="card">
+      <h2>Cloud Backend Health Diagnostic</h2>
+      <p class="card-desc">Tests independent serverless microservice connectivity and response payload latency.</p>
+      
+      <div class="diagnostic-box">
+        <div class="status-row">
+          <div>
+            <span style="font-size: 0.8rem; color: var(--text-muted); display: block;">Service Status:</span>
+            <span id="status">Checking backend...</span>
+          </div>
+          <button id="check">Check Backend</button>
+        </div>
+        <pre id="details"></pre>
+      </div>
+    </div>
+
+    <!-- Telemetry Metric Indicators -->
+    <div class="metrics-grid">
+      <div class="metric-pill">
+        <div class="metric-label">Eye Aspect Ratio</div>
+        <div class="metric-val" style="color: #38bdf8;">0.28</div>
+        <div class="metric-sub">Closed Thresh: &lt; 0.21</div>
+      </div>
+      <div class="metric-pill">
+        <div class="metric-label">PERCLOS (30s)</div>
+        <div class="metric-val" style="color: #22c55e;">14.2%</div>
+        <div class="metric-sub">Warn: &ge;40% | Crit: &ge;60%</div>
+      </div>
+      <div class="metric-pill">
+        <div class="metric-label">Mouth Aspect Ratio</div>
+        <div class="metric-val" style="color: #a855f7;">0.24</div>
+        <div class="metric-sub">Yawn Thresh: &ge; 0.65</div>
+      </div>
+      <div class="metric-pill">
+        <div class="metric-label">Inference Latency</div>
+        <div class="metric-val" style="color: #10b981;">28 ms</div>
+        <div class="metric-sub">Target: &lt; 100 ms</div>
+      </div>
+    </div>
+
+    <!-- Alert State Machine Simulator -->
+    <div class="card">
+      <h2>Interactive Alert State Machine Simulator</h2>
+      <p class="card-desc">Simulate driver fatigue metrics to observe staged escalating hysteresis and emergency microsleep triggers in real time.</p>
+      
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>PERCLOS Ratio (% Eye Closure in 30s Window)</span>
+          <span id="perclos-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">15%</span>
+        </div>
+        <input type="range" id="perclos-slider" min="0" max="100" value="15" oninput="updateSim()">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Continuous Eye Closure Duration (Microsleep)</span>
+          <span id="dur-num" style="font-family: 'JetBrains Mono'; font-weight: 600; color: var(--primary);">0.0s</span>
+        </div>
+        <input type="range" id="dur-slider" min="0" max="50" value="0" step="1" oninput="updateSim()">
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <span style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Evaluated Alert Level:</span>
+        <div id="state-display" class="state-badge state-normal">NORMAL (Driver Alert & Clear)</div>
+      </div>
+    </div>
+
+    <!-- Endpoints & Exhibition Links -->
+    <div class="card">
+      <h2>Exhibition Telemetry & API Endpoints</h2>
+      <p class="card-desc">Access live serverless probe routes and project repository:</p>
+      <div class="links-row">
+        <a class="btn-link" href="/api/health" target="_blank">GET /api/health</a>
+        <a class="btn-link" href="/api/index" target="_blank">GET /api/index</a>
+        <a class="btn-link" href="https://github.com/singhrajawatamit7-star/PROJECT_EXHIBITION" target="_blank">GitHub Repository</a>
+      </div>
+    </div>
+
+    <footer>
+      Edge-AI Driver Drowsiness Detection System &bull; Project Exhibition Prototype
+    </footer>
+  </div>
+
+  <script>
+    async function checkBackend() {
+      const status = document.getElementById("status");
+      const details = document.getElementById("details");
+      status.textContent = "Connecting...";
+      details.className = "";
+      details.textContent = "";
+
+      try {
+        const response = await fetch("/api/health");
+        const data = await response.json();
+        status.textContent = response.ok ? "Backend is reachable (Online)" : "Backend returned an error";
+        status.style.color = response.ok ? "var(--success)" : "var(--danger)";
+        details.textContent = JSON.stringify(data, null, 2);
+        details.className = "active";
+      } catch (error) {
+        status.textContent = "Backend connection failed: " + error.message;
+        status.style.color = "var(--danger)";
+        details.textContent = "Error Details: " + error.message + "\nEnsure Vercel Deployment Protection allows public access.";
+        details.className = "active";
+      }
+    }
+
+    document.getElementById("check").addEventListener("click", checkBackend);
+
+    // Run health check on page load automatically
+    window.addEventListener("DOMContentLoaded", () => {
+      checkBackend();
+    });
+
+    function updateSim() {
+      const p = parseInt(document.getElementById('perclos-slider').value) / 100;
+      const d = parseInt(document.getElementById('dur-slider').value) / 10;
+      document.getElementById('perclos-num').textContent = Math.round(p * 100) + '%';
+      document.getElementById('dur-num').textContent = d.toFixed(1) + 's';
+
+      const badge = document.getElementById('state-display');
+      if (d >= 2.5 || p >= 0.60) {
+        badge.className = 'state-badge state-critical';
+        badge.textContent = 'CRITICAL (Audio Alarm + Haptic Vibration)';
+      } else if (p >= 0.40) {
+        badge.className = 'state-badge state-warning';
+        badge.textContent = 'WARNING (Audio Alarm Tone)';
+      } else if (p >= 0.25) {
+        badge.className = 'state-badge state-watch';
+        badge.textContent = 'WATCH (Visual Warning Indicator)';
+      } else {
+        badge.className = 'state-badge state-normal';
+        badge.textContent = 'NORMAL (Driver Alert & Clear)';
+      }
+    }
+  </script>
+</body>
+</html>
