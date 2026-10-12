@@ -791,14 +791,29 @@
 
     async function loadLandmarker() {
       if (landmarker) return;
-      const base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
-      const mod = await import(base);
-      const vision = await mod.FilesetResolver.forVisionTasks(base + "/wasm");
-      landmarker = await mod.FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
-        runningMode: "VIDEO",
-        numFaces: 1
-      });
+      // The bare package URL resolves to a CommonJS file that browsers cannot import().
+      // Import the ES-module bundle explicitly, with a second CDN as fallback.
+      const bases = [
+        `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`,
+        `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}`
+      ];
+      let lastErr = null;
+      for (const base of bases) {
+        try {
+          const mod = await import(base + "/vision_bundle.mjs");
+          const vision = await mod.FilesetResolver.forVisionTasks(base + "/wasm");
+          landmarker = await mod.FaceLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+            runningMode: "VIDEO",
+            numFaces: 1
+          });
+          return;
+        } catch (e) {
+          lastErr = e;
+          console.warn("MediaPipe load failed from", base, e);
+        }
+      }
+      throw new Error("Could not load the face model (" + (lastErr && lastErr.message) + "). Check your internet connection or any ad/content blocker.");
     }
 
     function stateRank(s) { return ["normal", "watch", "warning", "critical"].indexOf(s); }
